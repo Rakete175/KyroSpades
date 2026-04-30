@@ -19,7 +19,7 @@ This project is a modified fork of [ButterSpades](https://github.com/utf-4096/bu
 | **Smooth Transition to ADS** | Zoom in effect added to scope pngs. |
 | **Adjustable ADS FOV** | ADS FOV (zoom) of each weapon could be individually adjusted in settings now (this is the only client I know that has this feature :D |
 | **Smooth acceleration of spectator camera** | Spectator camera now uniformly accelerates upto maximum speed rahter than starting off abruptly at maximum set speed. |
-| **Roll Controll for Spectator Mode With Removed movement Limitations** | Limitations in movement have been removed and the camera can roll too, making it pretty similar to how a FPV drone would feel. |
+| **Roll Controll for Spectator Mode With Removed Movement Limitations** | Limitations in movement have been removed and the camera can roll too, making it pretty similar to how a FPV drone would feel. |
 | **Hit Indicators Added** | Hit indicator sounds have been added. |
 | **Chat Scroll Added** | Can scroll chat using scroll wheel when chat window is opened. |
 | **Visible Team Scores at Top** | Score table does not need to be opened for seeing score of teams, a small score display is always visible. |
