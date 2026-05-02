@@ -76,6 +76,7 @@ enum window_keys {
 	WINDOW_KEY_VOLUME_UP,
 	WINDOW_KEY_VOLUME_DOWN,
 	WINDOW_KEY_V,
+	WINDOW_KEY_C,
 	WINDOW_KEY_FULLSCREEN,
 	WINDOW_KEY_SCREENSHOT,
 	WINDOW_KEY_COMMAND,
@@ -128,7 +129,11 @@ void window_textinput(int allow);
 float window_time(void);
 void window_keyname(int keycode, char* output, size_t length);
 const char* window_clipboard(void);
+void window_setclipboard(const char* text);
 int window_key_down(int key);
+int window_super_down(void);
+void window_cursor_hand(int on);
+void window_open_url(const char* url);
 void window_mousemode(int mode);
 void window_mouseloc(double* x, double* y);
 void window_setmouseloc(double x, double y);

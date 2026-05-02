@@ -50,6 +50,7 @@
 #include "font.h"
 #include "sound.h"
 #include "gmi.h"
+#include "chatlog.h"
 
 struct hud* hud_active;
 struct window_instance* hud_window;
@@ -68,6 +69,7 @@ void hud_init() {
 	hud_serverlist.ctx = malloc(sizeof(mu_Context));
 	hud_settings.ctx = malloc(sizeof(mu_Context));
 	hud_controls.ctx = malloc(sizeof(mu_Context));
+	hud_chatlog.ctx = malloc(sizeof(mu_Context));
 
 	hud_change(&hud_serverlist);
 }
@@ -2716,12 +2718,13 @@ static void hud_common_nav(mu_Context* ctx, mu_Rect* frame, float scalex, float 
 	int C = ctx->text_width(ctx->style->font, "Controls", 0) * 1.5F;
 	int D = ctx->text_width(ctx->style->font, "New updates", 0) * 1.2F;
 	int E = ctx->text_width(ctx->style->font, network_connected ? "Disconnect": "Exit", 0) * 1.5F;
+	int L = ctx->text_width(ctx->style->font, "Chat Log", 0) * 1.5F;
 
 	if(network_connected) {
 		if(serverlist_is_outdated) {
-			mu_layout_row(ctx, 5, (int[]) {B, C, D, E, -1}, 0);
+			mu_layout_row(ctx, 6, (int[]) {B, C, L, D, E, -1}, 0);
 		} else {
-			mu_layout_row(ctx, 4, (int[]) {B, C, E, -1}, 0);
+			mu_layout_row(ctx, 5, (int[]) {B, C, L, E, -1}, 0);
 		}
 	} else {
 		if(serverlist_is_outdated) {
@@ -2737,6 +2740,13 @@ static void hud_common_nav(mu_Context* ctx, mu_Rect* frame, float scalex, float 
 
 	hud_nav_button(ctx, &hud_settings, "Settings");
 	hud_nav_button(ctx, &hud_controls, "Controls");
+
+	/* Chat Log only makes sense while connected to a server (it's where the
+	   messages come from). When disconnected we hide the tab entirely so
+	   the layout collapses cleanly. */
+	if(network_connected) {
+		hud_nav_button(ctx, &hud_chatlog, "Chat Log");
+	}
 
 	if(serverlist_is_outdated) {
 		mu_text_color(ctx, 255, 255, 60);
@@ -3615,3 +3625,11 @@ struct hud hud_controls = {
 	0,
 	NULL,
 };
+
+void hud_common_render_for_chatlog(mu_Context* ctx) {
+	hud_common_render(ctx);
+}
+
+void hud_common_nav_for_chatlog(mu_Context* ctx, mu_Rect* frame, float scalex, float scaley) {
+	hud_common_nav(ctx, frame, scalex, scaley);
+}

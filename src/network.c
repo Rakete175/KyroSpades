@@ -48,6 +48,8 @@ int network_logged_in = 0;
 int network_map_transfer = 0;
 int network_received_packets = 0;
 int network_map_cached = 0;
+char network_current_ip[64] = {0};
+int  network_current_port = 0;
 
 float network_pos_update = 0.0F;
 struct Position network_pos_last;
@@ -1011,6 +1013,9 @@ int network_connect_sub(char* ip, int port, int version) {
 		network_received_packets = 0;
 		network_connected = 1;
 		gmi_mode = GMI_MODE_UNDETECTED;
+		strncpy(network_current_ip, ip, sizeof(network_current_ip) - 1);
+		network_current_ip[sizeof(network_current_ip) - 1] = 0;
+		network_current_port = port;
 
 		float start = window_time();
 		while(window_time() - start < 1.0F) { // listen connection for 1s, check if server disconnects
