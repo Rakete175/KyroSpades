@@ -597,10 +597,17 @@ void text_input(struct window_instance* window, unsigned int codepoint) {
 	if(chat_input_mode == CHAT_NO_INPUT)
 		return;
 
+	extern int chat_cursor;
 	int len = strlen(chat[0][0]);
-	if(len < 128) {
-		chat[0][0][len] = codepoint;
-		chat[0][0][len + 1] = 0;
+	if(len < 254 && codepoint > 0 && codepoint < 128) {
+		/* Insert at cursor instead of appending so navigation works. */
+		if(chat_cursor < 0) chat_cursor = 0;
+		if(chat_cursor > len) chat_cursor = len;
+		memmove(chat[0][0] + chat_cursor + 1,
+				chat[0][0] + chat_cursor,
+				len - chat_cursor + 1);
+		chat[0][0][chat_cursor] = (char)codepoint;
+		chat_cursor++;
 	}
 }
 

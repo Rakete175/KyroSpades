@@ -151,6 +151,78 @@ int show_exit = 0;
 int show_update_popup = 0;
 static char latest_ver[32];
 
+/* Multi-line chat input: cursor offset into chat[0][0] in bytes, plus
+   wrapping helpers. Buffer remains a single string (newlines never get
+   stored), but the field can wrap onto up to CHAT_INPUT_MAX_ROWS rows. */
+#define CHAT_INPUT_MAX_ROWS 3
+#define CHAT_INPUT_ROW_H 16.0F
+int chat_cursor = 0;
+int chat_input_rows = 1;
+
+static void chat_cursor_clamp(void) {
+	int len = (int)strlen(chat[0][0]);
+	if(chat_cursor < 0) chat_cursor = 0;
+	if(chat_cursor > len) chat_cursor = len;
+}
+
+static int chat_wrap(float available_w, int* row_starts, int* row_lens, int max_rows) {
+	char* s = chat[0][0];
+	int len = (int)strlen(s);
+	if(len == 0) { row_starts[0] = 0; row_lens[0] = 0; return 1; }
+	int rows = 0;
+	int i = 0;
+	char tmp[260];
+	while(rows < max_rows) {
+		int start = i;
+		int last_break = -1;
+		int hard_break = -1;
+		int end = i;
+		while(end < len) {
+			if(s[end] == '\n') { hard_break = end; break; }
+			int take = end - start + 1;
+			if(take >= (int)sizeof(tmp)) break;
+			memcpy(tmp, s + start, take);
+			tmp[take] = 0;
+			if(font_length(CHAT_INPUT_ROW_H, tmp) > available_w) break;
+			if(s[end] == ' ') last_break = end;
+			end++;
+		}
+		if(hard_break >= 0) {
+			row_starts[rows] = start;
+			row_lens[rows] = hard_break - start;
+			rows++;
+			i = hard_break + 1;
+			if(i > len) break;
+			continue;
+		}
+		if(end >= len) {
+			row_starts[rows] = start;
+			row_lens[rows] = end - start;
+			rows++;
+			break;
+		}
+		int cut = (last_break > start) ? last_break + 1 : end;
+		if(cut <= start) cut = start + 1;
+		row_starts[rows] = start;
+		row_lens[rows] = cut - start;
+		rows++;
+		i = cut;
+	}
+	return rows;
+}
+
+static void chat_cursor_to_rowcol(const int* row_starts, const int* row_lens, int rows,
+								  int* out_row, int* out_col) {
+	for(int r = 0; r < rows; r++) {
+		int s = row_starts[r];
+		int e = s + row_lens[r];
+		if((chat_cursor >= s && chat_cursor < e) || (r == rows - 1 && chat_cursor >= s)) {
+			*out_row = r; *out_col = chat_cursor - s; return;
+		}
+	}
+	*out_row = rows - 1; *out_col = row_lens[rows - 1];
+}
+
 static void hud_ingame_init() {
 	window_textinput(0);
 	chat_input_mode = CHAT_NO_INPUT;
@@ -574,6 +646,9 @@ y = 75.F + ((k + 2.F) * (16.F + settings.chat_spacing)) - settings.chat_spacing 
 } else {
 y = 75.F + ((chat_messages - k + 1.F) * (16.F + settings.chat_spacing)) - settings.chat_spacing / 2.F;
 }
+/* Lift messages so a multi-row input prompt doesn't paint over them. */
+if(chat_input_mode != CHAT_NO_INPUT && chat_input_rows > 1)
+y += (chat_input_rows - 1) * 16.0F;
 } else {
 y = settings.window_height - 22.0F - 10.0F * k - k * 8.F;
 }
@@ -1298,21 +1373,44 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 			glColor3f(1.0F, 1.0F, 1.0F);
 
 			if(chat_input_mode != CHAT_NO_INPUT) {
+				chat_cursor_clamp();
+				float avail_w = (float)settings.window_width - 11.0F - 16.0F;
+				int row_starts[CHAT_INPUT_MAX_ROWS], row_lens[CHAT_INPUT_MAX_ROWS];
+				int rows = chat_wrap(avail_w, row_starts, row_lens, CHAT_INPUT_MAX_ROWS);
+				chat_input_rows = rows;
+				int cur_row = 0, cur_col = 0;
+				chat_cursor_to_rowcol(row_starts, row_lens, rows, &cur_row, &cur_col);
+				/* Render rows bottom-up so the cursor's row sits on the original
+				   baseline (y=69) and earlier wrapped rows stack above. The
+				   prefix label rides on the topmost rendered row. */
+				float top_y = 69.F + (rows - 1) * CHAT_INPUT_ROW_H;
 				switch(chat_input_mode) {
 					case CHAT_ALL_INPUT:
-						font_render(11.0F, 84.F, 16.0F,
-									"Global:");
+						font_render(11.0F, top_y + 15.F, 16.0F, "Global:");
 						break;
 					case CHAT_TEAM_INPUT:
-						font_render(11.0F, 84.F, 16.0F,
-									"Team:");
+						font_render(11.0F, top_y + 15.F, 16.0F, "Team:");
 						break;
 				}
-				int l = strlen(chat[0][0]);
-				chat[0][0][l] = '_';
-				chat[0][0][l + 1] = 0;
-				font_render(11.0F, 69.F, 16.0F, chat[0][0]);
-				chat[0][0][l] = 0;
+				char tmp[260];
+				for(int r = 0; r < rows; r++) {
+					float y = 69.F + (rows - 1 - r) * CHAT_INPUT_ROW_H;
+					int n = row_lens[r];
+					if(n >= (int)sizeof(tmp)) n = (int)sizeof(tmp) - 1;
+					memcpy(tmp, chat[0][0] + row_starts[r], n);
+					tmp[n] = 0;
+					font_render(11.0F, y, 16.0F, tmp);
+					if(r == cur_row) {
+						int cc = chat_cursor - row_starts[r];
+						if(cc < 0) cc = 0;
+						if(cc > n) cc = n;
+						char before[260];
+						memcpy(before, chat[0][0] + row_starts[r], cc);
+						before[cc] = 0;
+						float cx = 11.0F + font_length(16.0F, before);
+						font_render(cx, y, 16.0F, "_");
+					}
+				}
 			}
 
 			for(int k = 0; k < chat_messages; k++) {
@@ -2346,18 +2444,83 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 		if(action != WINDOW_RELEASE) {
 			if(key == WINDOW_KEY_V && mods) {
 				const char* clipboard = window_clipboard();
-				if(clipboard)
-					strcat(chat[0][0], clipboard);
+				if(clipboard) {
+					chat_cursor_clamp();
+					size_t len = strlen(chat[0][0]);
+					size_t cap = sizeof(chat[0][0]);
+					size_t paste_len = strlen(clipboard);
+					size_t room = (len < cap - 1) ? (cap - 1 - len) : 0;
+					if(paste_len > room) paste_len = room;
+					memmove(chat[0][0] + chat_cursor + paste_len,
+							chat[0][0] + chat_cursor,
+							len - chat_cursor + 1);
+					for(size_t i = 0; i < paste_len; i++) {
+						char c = clipboard[i];
+						/* Keep \n verbatim (rendered as a hard line break);
+						   normalize \r and \t away. Newlines are flattened
+						   to spaces only at protocol-send time. */
+						if(c == '\r') c = '\n';
+						else if(c == '\t') c = ' ';
+						chat[0][0][chat_cursor + i] = c;
+					}
+					chat_cursor += (int)paste_len;
+				}
 			}
 
-			// Arrow up
-			if(key == WINDOW_KEY_HISTORY_PREVIOUS && chat_history_pos < 127) {
-				strcpy(chat[0][0], chat[2][++chat_history_pos]);
+			/* Up at top row recalls older history; otherwise moves the cursor
+			   up one visual row. Down at bottom row pulls newer history. */
+			if(key == WINDOW_KEY_HISTORY_PREVIOUS) {
+				float avail_w = (float)settings.window_width - 11.0F - 16.0F;
+				int rs[CHAT_INPUT_MAX_ROWS], rl[CHAT_INPUT_MAX_ROWS];
+				int rows = chat_wrap(avail_w, rs, rl, CHAT_INPUT_MAX_ROWS);
+				int cr = 0, cc = 0;
+				chat_cursor_to_rowcol(rs, rl, rows, &cr, &cc);
+				if(cr == 0) {
+					if(chat_history_pos < 127) {
+						strcpy(chat[0][0], chat[2][++chat_history_pos]);
+						chat_cursor = (int)strlen(chat[0][0]);
+					}
+				} else {
+					int dst = cr - 1;
+					int target = cc; if(target > rl[dst]) target = rl[dst];
+					chat_cursor = rs[dst] + target;
+				}
 			}
 
-			// Arrow down
-			if(key == WINDOW_KEY_HISTORY_NEXT && chat_history_pos> 0) {
-				strcpy(chat[0][0], chat[2][--chat_history_pos]);
+			if(key == WINDOW_KEY_HISTORY_NEXT) {
+				float avail_w = (float)settings.window_width - 11.0F - 16.0F;
+				int rs[CHAT_INPUT_MAX_ROWS], rl[CHAT_INPUT_MAX_ROWS];
+				int rows = chat_wrap(avail_w, rs, rl, CHAT_INPUT_MAX_ROWS);
+				int cr = 0, cc = 0;
+				chat_cursor_to_rowcol(rs, rl, rows, &cr, &cc);
+				if(cr >= rows - 1) {
+					if(chat_history_pos > 0) {
+						strcpy(chat[0][0], chat[2][--chat_history_pos]);
+						chat_cursor = (int)strlen(chat[0][0]);
+					}
+				} else {
+					int dst = cr + 1;
+					int target = cc; if(target > rl[dst]) target = rl[dst];
+					chat_cursor = rs[dst] + target;
+				}
+			}
+
+			/* GLFW arrow keys are bound to WINDOW_KEY_CURSOR_* by config.c,
+			   so we must intercept those names rather than the raw codes. */
+			if(key == WINDOW_KEY_CURSOR_LEFT) {
+				if(chat_cursor > 0) chat_cursor--;
+			}
+			if(key == WINDOW_KEY_CURSOR_RIGHT) {
+				int len = (int)strlen(chat[0][0]);
+				if(chat_cursor < len) chat_cursor++;
+			}
+			/* Home/End arrive as WINDOW_KEY_UNKNOWN since they have no binding. */
+			if(key == WINDOW_KEY_UNKNOWN) {
+				int len = (int)strlen(chat[0][0]);
+				switch(internal) {
+					case 268: chat_cursor = 0;   break;     /* Home */
+					case 269: chat_cursor = len; break;     /* End  */
+				}
 			}
 
 			if(key == WINDOW_KEY_ESCAPE || key == WINDOW_KEY_ENTER) {
@@ -2367,6 +2530,10 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 					msg.player_id = local_player_id;
 					msg.chat_type = (chat_input_mode == CHAT_ALL_INPUT) ? CHAT_ALL : CHAT_TEAM;
 					strcpy(msg.message, chat[0][0]);
+					/* Flatten visual line breaks to spaces - the protocol carries
+					   a single logical line per message. */
+					for(size_t i = 0; msg.message[i]; i++)
+						if(msg.message[i] == '\n') msg.message[i] = ' ';
 					network_send(PACKET_CHATMESSAGE_ID, &msg,
 								 sizeof(msg) - sizeof(msg.message) + strlen(chat[0][0]) + 1);
 					sound_create(SOUND_LOCAL, &sound_chat, 0.0F, 0.0F, 0.0F);
@@ -2376,11 +2543,17 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 				chat_input_mode = CHAT_NO_INPUT;
 				chat_scroll_offset = 0;
 				chat[0][0][0] = 0;
+				chat_cursor = 0;
+				chat_input_rows = 1;
 			}
 			if(key == WINDOW_KEY_BACKSPACE) {
-				size_t text_len = strlen(chat[0][0]);
-				if(text_len > 0) {
-					chat[0][0][text_len - 1] = 0;
+				chat_cursor_clamp();
+				if(chat_cursor > 0) {
+					size_t len = strlen(chat[0][0]);
+					memmove(chat[0][0] + chat_cursor - 1,
+							chat[0][0] + chat_cursor,
+							len - chat_cursor + 1);
+					chat_cursor--;
 				}
 			}
 		}
