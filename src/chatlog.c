@@ -86,6 +86,9 @@ static int needs_scroll_to_bottom = 1;
 static intptr_t prev_top_chat_idx = -1;
 static int prev_top_chat_len = 0;
 static char prev_live_newest[256] = {0};
+/* Last observed chathistory_count(); used to detect prepends so we can
+   anchor the scroll position only when older lines were actually loaded. */
+static int prev_history_count = 0;
 
 #define CTXMENU_W 220
 #define CTXMENU_H 26
@@ -131,6 +134,13 @@ static int  pending_url_press_y = 0;
 
 /* Tracked so we only flip the OS cursor when state actually changes. */
 static int hand_cursor_active = 0;
+
+/* Captured at the end of each render so the mouse handler can tell
+   whether a press landed on the scrollbar / outside the line area, in
+   which case we must NOT start a text selection. Without this, dragging
+   the scroll thumb sweeps the cursor across many line rects and grows
+   a runaway selection. */
+static mu_Rect content_body_rect = {0, 0, 0, 0};
 
 static int is_url_byte(unsigned char c) {
 	if(c <= 0x20) return 0;
@@ -535,25 +545,55 @@ static void update_hover_cursor(mu_Context* ctx) {
 }
 
 /* Lift dark team colors toward a minimum perceived brightness so a black
-   or dark-blue team name doesn't disappear against the panel background.
-   Hue is preserved by scaling all channels by the same factor; pure black
-   (no hue to preserve) gets a flat grey fallback. */
+   or pure-blue team name doesn't disappear against the panel background.
+
+   This is a two-phase lift:
+
+     Phase 1 - Saturate to ceiling.
+       Scale all channels so the brightest one hits 255. This preserves
+       hue exactly and brightens "diluted" hues like dark navy (0,0,80)
+       into pure blue (0,0,255) at zero hue cost. Pure black has no hue
+       to preserve and falls back to a flat readable grey.
+
+     Phase 2 - Mix toward white if still too dark.
+       Some saturated hues are perceptually dark even at maximum
+       saturation: pure blue's luminance is ~18/255, pure red ~54/255.
+       For these, no hue-preserving trick can make them readable on a
+       dark panel - we must add R+G (or G+B etc) channels. A hue-cost
+       lerp toward white covers exactly the residual brightness deficit
+       and stops there. Pure green (~71/255) needs only a small touch.
+
+   TARGET is chosen low enough that lifted colors stay clearly tied to
+   their team identity - pure blue ends up around (200,200,255), which
+   reads as light blue, not white. Adjust TARGET upward if it's still
+   hard to read on your panel background, downward if the lift looks too
+   pastel for your taste. */
 static mu_Color readable_color(int r, int g, int b) {
-	/* Rec.709 perceptual luminance. Pure blue's max channel can be high
-	   while its perceived brightness is near-black, so a max-channel test
-	   isn't enough - we need the weighted version. */
 	int y = (2126 * r + 7152 * g + 722 * b) / 10000;
-	const int TARGET = 110;
+	const int TARGET = 85;
 	if(y >= TARGET) return mu_color(r, g, b, 255);
-	/* Lift toward white by the deficit, preserving hue at the original's
-	   strength. f is in 0..256 (fixed point /256). */
-	int f = ((TARGET - y) * 256) / TARGET;
-	if(f > 256) f = 256;
-	int nr = (r * (256 - f) + 255 * f) >> 8;
-	int ng = (g * (256 - f) + 255 * f) >> 8;
-	int nb = (b * (256 - f) + 255 * f) >> 8;
-	if(nr > 255) nr = 255; if(ng > 255) ng = 255; if(nb > 255) nb = 255;
-	return mu_color(nr, ng, nb, 255);
+
+	/* Phase 1: hue-preserving saturation to ceiling. */
+	int mx = r; if(g > mx) mx = g; if(b > mx) mx = b;
+	if(mx <= 0) return mu_color(200, 200, 200, 255); /* pure black */
+	int sr = (r * 255) / mx;
+	int sg = (g * 255) / mx;
+	int sb = (b * 255) / mx;
+	int sy = (2126 * sr + 7152 * sg + 722 * sb) / 10000;
+
+	/* Phase 2: only if the saturated ceiling is itself too dark
+	   (typical for pure blue, deep red), lerp toward white. */
+	if(sy < TARGET) {
+		int f = ((TARGET - sy) * 256) / TARGET;
+		if(f > 256) f = 256;
+		sr = (sr * (256 - f) + 255 * f) >> 8;
+		sg = (sg * (256 - f) + 255 * f) >> 8;
+		sb = (sb * (256 - f) + 255 * f) >> 8;
+	}
+
+	if(sr > 255) sr = 255; if(sg > 255) sg = 255; if(sb > 255) sb = 255;
+	if(sr < 0) sr = 0;     if(sg < 0) sg = 0;     if(sb < 0) sb = 0;
+	return mu_color(sr, sg, sb, 255);
 }
 
 static mu_Color color_for_inline_code(unsigned char code) {
@@ -571,7 +611,11 @@ static mu_Color color_for_inline_code(unsigned char code) {
 
 static mu_Color color_from_packed(unsigned int packed) {
 	if(packed == 0) return mu_color(230, 230, 230, 255);
-	return mu_color(red(packed), green(packed), blue(packed), 255);
+	/* Apply the same readability lift as inline color codes. The [Global]
+	   prefix and any other text rendered before the first \x01/\x02 code
+	   uses this color directly; without the lift it stayed pitch-dark
+	   for blue teams while the rest of the line read fine. */
+	return readable_color(red(packed), green(packed), blue(packed));
 }
 
 /* chat[0][1] is newest, chat[0][127] is never written by chat_add's shift.
@@ -655,18 +699,52 @@ static void emit_day_separator(time_t when, int today_day) {
 	ph->plain_len = (int)strlen(ph->plain);
 }
 
+/* Marks a (re)connection-session boundary. is_current = 1 labels the
+   live ring's session ("Current session") so the user can tell at a
+   glance which lines belong to the current match vs ones replayed from
+   older log entries; is_current = 0 stamps each older session with its
+   start time. */
+static void emit_session_separator(time_t when, int is_current) {
+	if(line_count >= CHATLOG_MAX_LINES) return;
+	struct visible_line* ph = &lines[line_count++];
+	memset(ph, 0, sizeof(*ph));
+	ph->is_placeholder = 1;
+	ph->placeholder_count = 0;
+	if(is_current) {
+		snprintf(ph->plain, sizeof(ph->plain), "Current session");
+	} else {
+		struct tm tm = *localtime(&when);
+		char buf[16];
+		strftime(buf, sizeof(buf), "%H:%M", &tm);
+		snprintf(ph->plain, sizeof(ph->plain), "Session \u2022 %s", buf);
+	}
+	ph->plain_len = (int)strlen(ph->plain);
+}
+
 static void emit_chat_line(const char* raw, unsigned int color) {
 	if(line_count >= CHATLOG_MAX_LINES) return;
 	struct visible_line* vl = &lines[line_count++];
 	memset(vl, 0, sizeof(*vl));
 	vl->raw = raw;
-	vl->color = color;
 	vl->plain_len = strip_color_codes(raw, vl->plain);
 	char name[64];
 	int name_start = 0;
 	int name_len = extract_player_name(raw, name, sizeof(name), &name_start);
 	vl->name_start = name_start;
 	vl->name_len = name_len;
+	/* Server-origin lines (intel captures, joins, leaves, drops, pickups,
+	   game messages) are pushed into chat[] tagged with hud_accent_color(),
+	   which is the UI accent / your team color. That paints "Blue captured
+	   the intel" in unreadable navy and makes every server announcement
+	   look like a teammate said it. They're neutral by definition, so we
+	   force a soft grey here whenever the line has no leading player-name
+	   color tag. The original packed color is preserved for actual chat
+	   lines, which already arrive with proper inline color codes for the
+	   speaker's team, so this override is targeted, not blanket. */
+	if(name_len == 0)
+		vl->color = 0xC8C8C8; /* neutral light grey */
+	else
+		vl->color = color;
 	scan_urls(vl);
 }
 
@@ -698,6 +776,13 @@ static void build_visible_lines(void) {
 			emit_day_separator(h->when, today_day);
 			last_day = dd;
 		}
+		/* Each replayed (re)connection gets its own session marker.
+		   When the session also crosses a day boundary the day
+		   separator above renders first; both are kept because they
+		   answer different questions ("which day" vs "which join"). */
+		if(h->is_session_start)
+			emit_session_separator(h->when, 0);
+
 		/* Historical lines render in a slightly muted default color; inline
 		   color codes will repaint name/team segments as usual. */
 		emit_chat_line(h->raw, 0xAAAAAA);
@@ -718,6 +803,15 @@ static void build_visible_lines(void) {
 			/* No history at all - skip leading separator to keep the bare
 			   live view clean. */
 		}
+
+		/* Anything in `lines` so far comes from chathistory replays of
+		   earlier sessions; mark the boundary so the live ring is
+		   visually scoped to the current connection. We skip the marker
+		   when nothing precedes the live chat to avoid a lone "Current
+		   session" header floating at the top of an otherwise-fresh
+		   chatlog. */
+		if(line_count > 0)
+			emit_session_separator(time(NULL), 1);
 
 		/* chat[0][highest] is oldest, chat[0][1] is newest. */
 		for(int k = highest; k >= 1 && line_count < CHATLOG_MAX_LINES; k--) {
@@ -833,34 +927,51 @@ static void render_chat_line(mu_Context* ctx, int line_index) {
 	const char* raw = vl->raw;
 	if(!raw) return;
 	mu_Color cur = color_from_packed(vl->color);
-	float pen_x = 0.f;
 	char run[256];
 	int run_len = 0;
+	int run_start_offset = 0;     /* plain-text offset where current run began */
+	int run_in_url = 0;           /* current run lies inside a URL range */
+	int plain_offset = 0;         /* count of non-color-code bytes seen so far */
 
 	for(int i = 0; ; i++) {
 		unsigned char c = (unsigned char)raw[i];
 		int is_code = (c >= 1 && c <= 7);
 		int is_end  = (c == 0);
+		int in_url  = (!is_code && !is_end)
+					  ? (url_at_position(line_index, plain_offset) >= 0)
+					  : run_in_url;
+		int boundary = (run_len > 0) && (in_url != run_in_url);
 
-		if(is_code || is_end) {
-			if(run_len > 0) {
+		if(is_code || is_end || boundary) {
+			/* Flush whatever the run holds. URL bytes are intentionally
+			   skipped here; the URL overlay pass below paints them in
+			   link color. Drawing them twice (here and there) was what
+			   made periods merge into the underline and made glyphs look
+			   bold, e.g. claude.ai reading as "claude_ai". */
+			if(run_len > 0 && !run_in_url) {
 				run[run_len] = 0;
+				float x = plain_prefix_width(vl->plain, run_start_offset);
 				mu_draw_text(ctx, ctx->style->font, run, run_len,
-							 mu_vec2(r.x + (int)pen_x, r.y), cur);
-				pen_x += font_length((float)CHATLOG_TEXT_HEIGHT, run);
-				run_len = 0;
+							 mu_vec2(r.x + (int)x, r.y), cur);
 			}
+			run_len = 0;
 			if(is_end) break;
-			cur = color_for_inline_code(c);
-			continue;
+			if(is_code) { cur = color_for_inline_code(c); continue; }
+			/* boundary only: fall through to start a new run with the
+			   current byte. */
 		}
 
+		if(run_len == 0) {
+			run_start_offset = plain_offset;
+			run_in_url = in_url;
+		}
 		if(run_len < (int)sizeof(run) - 1) run[run_len++] = (char)c;
+		plain_offset++;
 	}
 
-	/* Overlay URL accents and underlines based on plain-text offsets. We
-	   reproject offsets through the same width function that laid the text
-	   out, so any color-code stripping stays in sync. */
+	/* URL pass: draw each URL once in the accent color and add a thin
+	   underline. The main pass above deliberately skipped these bytes so
+	   we are not over-painting. */
 	for(int u = 0; u < vl->url_count; u++) {
 		int us = vl->urls[u].start;
 		int ue = vl->urls[u].end;
@@ -876,7 +987,10 @@ static void render_chat_line(mu_Context* ctx, int line_index) {
 		tmp[n] = 0;
 		mu_draw_text(ctx, ctx->style->font, tmp, n,
 					 mu_vec2(r.x + (int)x0, r.y), link);
-		mu_draw_rect(ctx, mu_rect(r.x + (int)x0, r.y + r.h - 2,
+		/* Underline at the bottom row of the line cell. r.h - 1 keeps it
+		   strictly below the descender area so periods at the baseline
+		   no longer visually fuse with it into a fake underscore. */
+		mu_draw_rect(ctx, mu_rect(r.x + (int)x0, r.y + r.h - 1,
 								  (int)(x1 - x0), 1), link);
 	}
 }
@@ -890,6 +1004,13 @@ static void hud_chatlog_init(void) {
 	prev_top_chat_idx = -1;
 	prev_top_chat_len = 0;
 	prev_live_newest[0] = 0;
+	/* Reset visible-line state too. Without these, re-entering the
+	   chatlog with leftover line_count and prev_history_count from a
+	   previous session can mis-classify the first frame's growth as a
+	   prepend and shift the scroll incorrectly. */
+	line_count = 0;
+	prev_history_count = 0;
+	content_body_rect = mu_rect(0, 0, 0, 0);
 	ctxmenu_visible = 0;
 	ctxmenu_kind = CTXMENU_KIND_COPY;
 	ctxmenu_payload[0] = 0;
@@ -987,23 +1108,37 @@ static void hud_chatlog_render(mu_Context* ctx, float scalex, float scaley) {
 		mu_begin_panel(ctx, "ChatLogContent");
 		mu_Container* panel = mu_get_current_container(ctx);
 
+		/* Cache the panel body (already shrunk by microui to exclude the
+		   scrollbar) so the mouse handler can reject clicks that land on
+		   the scrollbar. */
+		content_body_rect = panel->body;
+
 		int prev_content_h = panel->content_size.y;
 		int prev_count = line_count;
+		/* Track chathistory size separately so we can distinguish a
+		   genuine prepend (older messages loaded) from an append (new
+		   live message arriving). The previous code treated any growth
+		   in line_count as a prepend, which scrolled the user's view
+		   downward by one line per incoming live message while they were
+		   trying to read older history. */
+		int prev_hc = prev_history_count;
+		int cur_hc = chathistory_count();
 
 		build_visible_lines();
 
-		/* If history prepended new lines this frame, shift scroll down by
-		   the height of those lines so the user's view stays anchored on
-		   the same content instead of jumping to the new top. */
-		if(line_count > prev_count && prev_count > 0) {
+		/* Anchor the user's reading position only when the growth came
+		   from chathistory (lines prepended at the top). Live additions
+		   land at the bottom and require no scroll adjustment. */
+		if(cur_hc > prev_hc && prev_count > 0) {
 			int added_h = (line_count - prev_count) * CHATLOG_TEXT_HEIGHT;
 			(void)prev_content_h;
-			panel->scroll.y += added_h;
+			if(added_h > 0) panel->scroll.y += added_h;
 			/* Selection indices are positional; prepending invalidates them. */
 			sel_anchor_line = sel_active_line = -1;
 			lmb_dragging = 0;
 			pending_anchor = 0;
 		}
+		prev_history_count = cur_hc;
 
 		int top_idx = -1; /* unused now; kept for ABI minimality */
 		const char* top_raw = (line_count > 0) ? lines[line_count - 1].raw : NULL;
@@ -1175,6 +1310,24 @@ static void hud_chatlog_mouseclick(double x, double y, int button, int action, i
 			   && my >= filter_server_btn.y && my < filter_server_btn.y + filter_server_btn.h) {
 				filter_hide_server = !filter_hide_server;
 				return;
+			}
+			/* Reject presses that land outside the rendered content body
+			   (e.g. on the vertical scrollbar). microui handles scrollbar
+			   drag itself; if we ALSO start a text selection here, the
+			   user's scroll-thumb drag sweeps a runaway selection across
+			   every line the cursor passes over. */
+			if(content_body_rect.w > 0 && content_body_rect.h > 0) {
+				if(mx <  content_body_rect.x ||
+				   mx >= content_body_rect.x + content_body_rect.w ||
+				   my <  content_body_rect.y ||
+				   my >= content_body_rect.y + content_body_rect.h) {
+					/* Clear any half-open selection and let microui own
+					   this press for scrollbar interaction. */
+					sel_anchor_line = sel_active_line = -1;
+					pending_anchor = 0;
+					lmb_dragging = 0;
+					return;
+				}
 			}
 			/* Ctrl/Cmd + LMB on an existing selection copies without
 			   clobbering it. Provides a working "click to copy" gesture on

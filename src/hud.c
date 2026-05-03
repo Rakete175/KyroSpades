@@ -2199,6 +2199,10 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 				chat_input_mode = CHAT_ALL_INPUT;
 				chat_scroll_offset = 0;
 				strcpy(chat[0][0], "/");
+				/* Cursor must follow the prefilled "/", otherwise stale
+				   chat_cursor (typically 0) places typed chars before the
+				   slash, producing "kill/" instead of "/kill". */
+				chat_cursor = (int)strlen(chat[0][0]);
 			}
 
 			if(key == WINDOW_KEY_CHAT) {

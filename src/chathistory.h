@@ -12,6 +12,10 @@
 struct chathistory_line {
 	char raw[256];   /* contains color codes, same shape as chat[][] */
 	time_t when;     /* line timestamp parsed from log header */
+	int is_session_start; /* 1 if this is the first chat line of a
+	                         (re)connection session for the target server,
+	                         used by the chatlog renderer to draw a
+	                         session separator before this line. */
 };
 
 void chathistory_reset(void);

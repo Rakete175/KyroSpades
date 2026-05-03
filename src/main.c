@@ -76,7 +76,16 @@ void chat_add(int channel, unsigned int color, const char* msg) {
 }
 
 void chat_clear(int channel) {
-	memset(chat[channel][2], 0, sizeof(chat[channel][0]) * 126);
+	/* Clear from index 1 (the newest-message slot), not 2. The previous
+	   range left chat[ch][1] populated with whatever the last server sent
+	   us, so joining server B kept server A's final chat line in the ring
+	   - it migrated backward through the buffer as B's own messages
+	   arrived and stayed visible in the chatlog tab until 127 new lines
+	   pushed it off the end. The parallel color/timer arrays are wiped
+	   as well so no stale fade-in timing fires on freshly cleared slots. */
+	memset(chat[channel][1], 0, sizeof(chat[channel][0]) * 127);
+	memset(&chat_color[channel][1], 0, sizeof(chat_color[channel][0]) * 127);
+	memset(&chat_timer[channel][1], 0, sizeof(chat_timer[channel][0]) * 127);
 }
 
 char chat_popup[256] = {};

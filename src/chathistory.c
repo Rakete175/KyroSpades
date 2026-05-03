@@ -198,6 +198,9 @@ static int scan_log_file(const char* path, struct hist_state* out, int is_today)
 	rewind(f);
 	int produced = 0;
 	long line_start = ftell(f);
+	/* Set whenever we see a 'Connecting to <target>' line; consumed by
+	   the next emitted chat line to mark the session boundary. */
+	int next_is_session_start = 0;
 	while(fgets(line, sizeof(line), f)) {
 		if(cutoff_off >= 0 && line_start >= cutoff_off) break;
 		line_start = ftell(f);
@@ -207,6 +210,11 @@ static int scan_log_file(const char* path, struct hist_state* out, int is_today)
 			strncpy(cur_ip, tmp_ip, sizeof(cur_ip) - 1);
 			cur_ip[sizeof(cur_ip) - 1] = 0;
 			cur_port = tmp_port;
+			/* Only matters when this connection lands on the server
+			   we're currently filtering for; lines from other servers
+			   never reach the emit branch anyway. */
+			if(strcmp(cur_ip, target_ip) == 0 && cur_port == target_port)
+				next_is_session_start = 1;
 			continue;
 		}
 
@@ -218,6 +226,8 @@ static int scan_log_file(const char* path, struct hist_state* out, int is_today)
 		struct chathistory_line hl;
 		memset(&hl, 0, sizeof(hl));
 		hl.when = parse_log_timestamp(line);
+		hl.is_session_start = next_is_session_start;
+		next_is_session_start = 0;
 
 		/* Trim trailing newline from payload. */
 		size_t pl = strlen(payload);

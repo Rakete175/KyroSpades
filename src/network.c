@@ -981,6 +981,13 @@ void network_disconnect() {
 		enet_peer_disconnect(peer, 0);
 		network_connected = 0;
 		network_logged_in = 0;
+		/* Belt-and-braces: the live chat ring belongs to the just-closed
+		   session. server_c also calls chat_clear on the next connect,
+		   but clearing here too prevents any UI that runs in the
+		   disconnected interval (or a reconnect that bypasses server_c)
+		   from showing the previous server's messages. */
+		chat_clear(0);
+		chat_clear(1);
 
 		ENetEvent event;
 		while(enet_host_service(client, &event, 3000) > 0) {
