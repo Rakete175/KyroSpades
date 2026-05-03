@@ -223,10 +223,13 @@ static void chat_cursor_to_rowcol(const int* row_starts, const int* row_lens, in
 	*out_row = rows - 1; *out_col = row_lens[rows - 1];
 }
 
+static int mouse_seed_pending = 1;
+
 static void hud_ingame_init() {
 	window_textinput(0);
 	chat_input_mode = CHAT_NO_INPUT;
 	window_mousemode(WINDOW_CURSOR_DISABLED);
+	mouse_seed_pending = 1;
 }
 
 struct player_table {
@@ -1838,6 +1841,14 @@ static void hud_ingame_scroll(double yoffset) {
 static double last_x, last_y;
 static void hud_ingame_mouselocation(double x, double y) {
 	if(chat_input_mode != CHAT_NO_INPUT || show_exit) {
+		return;
+	}
+
+	/* Skip first delta: cursor was free in another HUD. */
+	if(mouse_seed_pending) {
+		last_x = x;
+		last_y = y;
+		mouse_seed_pending = 0;
 		return;
 	}
 
