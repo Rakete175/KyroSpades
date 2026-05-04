@@ -94,7 +94,24 @@ static void window_impl_reshape(GLFWwindow* window, int width, int height) {
 	reshape(hud_window, width, height);
 }
 static void window_impl_textinput(GLFWwindow* window, unsigned int codepoint) {
-	text_input(hud_window, codepoint);
+	char buf[5];
+	int n = 0;
+	if(codepoint < 0x80) { buf[n++] = (char)codepoint; }
+	else if(codepoint < 0x800) {
+		buf[n++] = 0xC0 | (codepoint >> 6);
+		buf[n++] = 0x80 | (codepoint & 0x3F);
+	} else if(codepoint < 0x10000) {
+		buf[n++] = 0xE0 | (codepoint >> 12);
+		buf[n++] = 0x80 | ((codepoint >> 6) & 0x3F);
+		buf[n++] = 0x80 | (codepoint & 0x3F);
+	} else if(codepoint < 0x110000) {
+		buf[n++] = 0xF0 | (codepoint >> 18);
+		buf[n++] = 0x80 | ((codepoint >> 12) & 0x3F);
+		buf[n++] = 0x80 | ((codepoint >> 6) & 0x3F);
+		buf[n++] = 0x80 | (codepoint & 0x3F);
+	}
+	buf[n] = 0;
+	text_input(hud_window, buf);
 }
 static void window_impl_keys(GLFWwindow* window, int key, int scancode, int action, int mods) {
 	int count = config_key_translate(key, 0, NULL);
@@ -568,7 +585,7 @@ void window_update() {
 				}
 				break;
 			}
-			case SDL_TEXTINPUT: text_input(hud_window, event.text.text[0]); break;
+			case SDL_TEXTINPUT: text_input(hud_window, event.text.text); break;
 			case SDL_FINGERDOWN:
 				if(hud_active->input_touch) {
 					struct window_finger* f;

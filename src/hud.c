@@ -714,8 +714,8 @@ glColor3ub(255, 255, 255);
 char buffer[512];
 unsigned int i = 0;
 for(c = chat[channel][idx]; *c != '\0'; c++) {
-// Chat color
-if(*c > 7) {
+// Chat color codes are 1..7; everything else (including UTF-8 high bytes) is text.
+if((unsigned char)*c > 7) {
 buffer[i++] = *c;
 if(*(c + 1) != '\0') {
 continue;
@@ -2523,11 +2523,21 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 			/* GLFW arrow keys are bound to WINDOW_KEY_CURSOR_* by config.c,
 			   so we must intercept those names rather than the raw codes. */
 			if(key == WINDOW_KEY_CURSOR_LEFT) {
-				if(chat_cursor > 0) chat_cursor--;
+				if(chat_cursor > 0) {
+					chat_cursor--;
+					while(chat_cursor > 0
+						  && ((unsigned char)chat[0][0][chat_cursor] & 0xC0) == 0x80)
+						chat_cursor--;
+				}
 			}
 			if(key == WINDOW_KEY_CURSOR_RIGHT) {
 				int len = (int)strlen(chat[0][0]);
-				if(chat_cursor < len) chat_cursor++;
+				if(chat_cursor < len) {
+					chat_cursor++;
+					while(chat_cursor < len
+						  && ((unsigned char)chat[0][0][chat_cursor] & 0xC0) == 0x80)
+						chat_cursor++;
+				}
 			}
 			/* Home/End arrive as WINDOW_KEY_UNKNOWN since they have no binding. */
 			if(key == WINDOW_KEY_UNKNOWN) {
@@ -2564,11 +2574,17 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 			if(key == WINDOW_KEY_BACKSPACE) {
 				chat_cursor_clamp();
 				if(chat_cursor > 0) {
+					/* Walk back over UTF-8 continuation bytes (0x80..0xBF)
+					   to land on the start of the previous codepoint. */
+					int del_start = chat_cursor - 1;
+					while(del_start > 0
+						  && ((unsigned char)chat[0][0][del_start] & 0xC0) == 0x80)
+						del_start--;
 					size_t len = strlen(chat[0][0]);
-					memmove(chat[0][0] + chat_cursor - 1,
+					memmove(chat[0][0] + del_start,
 							chat[0][0] + chat_cursor,
 							len - chat_cursor + 1);
-					chat_cursor--;
+					chat_cursor = del_start;
 				}
 			}
 		}

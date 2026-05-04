@@ -599,25 +599,35 @@ static int mu_key_translate(int key) {
 	}
 }
 
-void text_input(struct window_instance* window, unsigned int codepoint) {
+void text_input(struct window_instance* window, const char* utf8) {
+	if(!utf8 || !utf8[0]) return;
+
 	if(hud_active->ctx)
-		mu_input_text(hud_active->ctx, (char[2]) {codepoint, 0});
+		mu_input_text(hud_active->ctx, utf8);
 
 	if(chat_input_mode == CHAT_NO_INPUT)
 		return;
 
 	extern int chat_cursor;
-	int len = strlen(chat[0][0]);
-	if(len < 254 && codepoint > 0 && codepoint < 128) {
-		/* Insert at cursor instead of appending so navigation works. */
-		if(chat_cursor < 0) chat_cursor = 0;
-		if(chat_cursor > len) chat_cursor = len;
-		memmove(chat[0][0] + chat_cursor + 1,
-				chat[0][0] + chat_cursor,
-				len - chat_cursor + 1);
-		chat[0][0][chat_cursor] = (char)codepoint;
-		chat_cursor++;
+	int len = (int)strlen(chat[0][0]);
+	int cap = (int)sizeof(chat[0][0]);
+	int add = (int)strlen(utf8);
+
+	/* Reject control bytes (0x01..0x07 are inline color codes, 0x08..0x1F
+	   non-printable). \n is allowed for multi-line input. */
+	for(int i = 0; i < add; i++) {
+		unsigned char c = (unsigned char)utf8[i];
+		if(c < 0x20 && c != '\n') return;
 	}
+
+	if(len + add >= cap - 1) return;
+	if(chat_cursor < 0) chat_cursor = 0;
+	if(chat_cursor > len) chat_cursor = len;
+	memmove(chat[0][0] + chat_cursor + add,
+			chat[0][0] + chat_cursor,
+			len - chat_cursor + 1);
+	memcpy(chat[0][0] + chat_cursor, utf8, add);
+	chat_cursor += add;
 }
 
 void keys(struct window_instance* window, int key, int scancode, int action, int mods) {
