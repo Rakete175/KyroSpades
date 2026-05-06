@@ -102,16 +102,30 @@ const char* network_reason_disconnect(int code) {
 }
 
 static void printJoinMsg(int team, char* name) {
+	/* Default labels when StateData hasn't populated team names yet (some
+	   pyspades configs send empty team names, others arrive with the
+	   join packet ahead of the state packet on weird networks). Without
+	   the fallback, the format string collapses "%c%s\6 team" into
+	   "<color>\6 team" and the user sees "joined the   team" with two
+	   spaces and no name in between - which is the actual bug report. */
 	char* t;
 	switch(team) {
-		case TEAM_1: t = gamestate.team_1.name; break;
-		case TEAM_2: t = gamestate.team_2.name; break;
+		case TEAM_1:
+			t = (gamestate.team_1.name[0] != 0) ? gamestate.team_1.name : "Blue";
+			break;
+		case TEAM_2:
+			t = (gamestate.team_2.name[0] != 0) ? gamestate.team_2.name : "Green";
+			break;
 		default:
 		case TEAM_SPECTATOR: t = "Spectator"; break;
 	}
-	char s[64];
+	/* Buffer was previously 64 - tight against 16-char names + 10-char
+	   team names + the format scaffolding. Bumped to 128 so we don't
+	   silently truncate the closing "\6 team" off the end. */
+	char s[128];
 	char team_color = team_color_char(team);
-	sprintf(s, "%c%s\6 joined the %c%s\6 team", team_color, name, team_color, t);
+	snprintf(s, sizeof(s), "%c%s\6 joined the %c%s\6 team",
+			 team_color, name, team_color, t);
 	chat_add(0, hud_accent_color(), s);
 }
 

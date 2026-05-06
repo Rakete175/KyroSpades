@@ -57,6 +57,15 @@ struct visible_line {
 	   into chat[][]; for history into the chathistory buffer. NULL for
 	   placeholder/separator lines. */
 	const char* raw;
+	/* Byte length to read from `raw`. -1 means read until '\0' (the
+	   classic single-segment case). Set to a finite length for the
+	   second-and-later segments produced when a single chat message
+	   contains '\n' and we want each segment on its own visible row. */
+	int raw_len;
+	/* 1 when this line is a continuation of a previous \n-split message.
+	   Suppresses the "[Global]" prefix and player-name extraction for
+	   continuation rows (only the first row carries the name). */
+	int is_continuation;
 	unsigned int color;
 	char plain[256];
 	int plain_len;
@@ -98,6 +107,7 @@ enum {
 	CTXMENU_KIND_COPY,
 	CTXMENU_KIND_FILTER,
 	CTXMENU_KIND_FILTER_CLEAR,
+	CTXMENU_KIND_SELECT_ALL,
 };
 
 static int   ctxmenu_visible = 0;
@@ -159,9 +169,11 @@ static mu_Rect content_body_rect = {0, 0, 0, 0};
 
 /* GLFW raw key codes we detect via the `internal` parameter on the
    keyboard callback - the configurable WINDOW_KEY_* mapping doesn't
-   cover the alphabetic letters we need (F for Ctrl+F), so we look at
-   the raw code instead. Same trick as the chat input's Home/End. */
+   cover the alphabetic letters we need (F for Ctrl+F, A for Ctrl+A),
+   so we look at the raw code instead. Same trick as the chat input's
+   Home/End. */
 #define CHATLOG_GLFW_KEY_F  70
+#define CHATLOG_GLFW_KEY_A  65
 
 struct search_match {
 	int line;       /* index into `lines` */
@@ -282,15 +294,23 @@ static void linkmodal_close(void) {
 	linkmodal_url[0] = 0;
 }
 
-static int strip_color_codes(const char* src, char* dst) {
+/* Strip inline color codes (1..7). When `max_bytes` >= 0 the read stops
+   after that many source bytes; '\n' always acts as a terminator so
+   newline-split segments don't bleed plain text into each other. */
+static int strip_color_codes_n(const char* src, int max_bytes, char* dst) {
 	int j = 0;
-	for(int i = 0; src[i]; i++) {
+	for(int i = 0; (max_bytes < 0 || i < max_bytes) && src[i]; i++) {
 		unsigned char c = (unsigned char)src[i];
+		if(c == '\n') break;
 		if(c >= 1 && c <= 7) continue;
 		dst[j++] = src[i];
 	}
 	dst[j] = 0;
 	return j;
+}
+
+static int strip_color_codes(const char* src, char* dst) {
+	return strip_color_codes_n(src, -1, dst);
 }
 
 static float plain_prefix_width(const char* s, int n) {
@@ -457,6 +477,25 @@ static void ctxmenu_show_filter_clear(int x, int y) {
 	ctxmenu_visible = 1;
 }
 
+/* Right-click on empty chat-log space: companion to Ctrl+A. */
+static void ctxmenu_show_select_all(int x, int y) {
+	ctxmenu_payload[0] = 0;
+	snprintf(ctxmenu_label, sizeof(ctxmenu_label), "Select all");
+	ctxmenu_kind = CTXMENU_KIND_SELECT_ALL;
+
+	int max_x = settings.window_width - CTXMENU_W - 4;
+	int max_y = settings.window_height - CTXMENU_H - 4;
+	if(x > max_x) x = max_x;
+	if(y > max_y) y = max_y;
+	if(x < 0) x = 0;
+	if(y < 0) y = 0;
+
+	ctxmenu_x = x;
+	ctxmenu_y = y;
+	ctxmenu_rect = mu_rect(x, y, CTXMENU_W, CTXMENU_H);
+	ctxmenu_visible = 1;
+}
+
 static int ctxmenu_hit(int mx, int my) {
 	return ctxmenu_visible
 		&& mx >= ctxmenu_rect.x && mx < ctxmenu_rect.x + ctxmenu_rect.w
@@ -483,6 +522,28 @@ static int filter_active(void) {
 	return filter_active_name[0] != 0;
 }
 
+/* Anchor at the first non-placeholder line, extend to the last. Used by
+   Ctrl+A and the "Select all" right-click menu. */
+static void select_all_lines(void) {
+	int first = -1, last = -1;
+	for(int i = 0; i < line_count; i++) {
+		if(!lines[i].is_placeholder) {
+			if(first < 0) first = i;
+			last = i;
+		}
+	}
+	if(first < 0) {
+		sel_anchor_line = sel_active_line = -1;
+		return;
+	}
+	sel_anchor_line = first;
+	sel_anchor_char = 0;
+	sel_active_line = last;
+	sel_active_char = lines[last].plain_len;
+	lmb_dragging = 0;
+	pending_anchor = 0;
+}
+
 static void ctxmenu_commit(void) {
 	if(ctxmenu_kind == CTXMENU_KIND_COPY) {
 		copy_selection_to_clipboard();
@@ -490,6 +551,8 @@ static void ctxmenu_commit(void) {
 		filter_set(ctxmenu_payload);
 	} else if(ctxmenu_kind == CTXMENU_KIND_FILTER_CLEAR) {
 		filter_clear();
+	} else if(ctxmenu_kind == CTXMENU_KIND_SELECT_ALL) {
+		select_all_lines();
 	}
 }
 
@@ -787,31 +850,54 @@ static void emit_session_separator(time_t when, int is_current) {
 	ph->plain_len = (int)strlen(ph->plain);
 }
 
-static void emit_chat_line(const char* raw, unsigned int color) {
+/* Emit a single visible row spanning [raw + start, raw + start + len).
+   `is_continuation` is set on segments after the first when a chat line
+   contains '\n' - the player-name extraction is skipped on those rows. */
+static void emit_chat_segment(const char* raw, int start, int len,
+							  unsigned int color, int is_continuation) {
 	if(line_count >= CHATLOG_MAX_LINES) return;
 	struct visible_line* vl = &lines[line_count++];
 	memset(vl, 0, sizeof(*vl));
-	vl->raw = raw;
-	vl->plain_len = strip_color_codes(raw, vl->plain);
-	char name[64];
-	int name_start = 0;
-	int name_len = extract_player_name(raw, name, sizeof(name), &name_start);
-	vl->name_start = name_start;
-	vl->name_len = name_len;
-	/* Server-origin lines (intel captures, joins, leaves, drops, pickups,
-	   game messages) are pushed into chat[] tagged with hud_accent_color(),
-	   which is the UI accent / your team color. That paints "Blue captured
-	   the intel" in unreadable navy and makes every server announcement
-	   look like a teammate said it. They're neutral by definition, so we
-	   force a soft grey here whenever the line has no leading player-name
-	   color tag. The original packed color is preserved for actual chat
-	   lines, which already arrive with proper inline color codes for the
-	   speaker's team, so this override is targeted, not blanket. */
-	if(name_len == 0)
-		vl->color = 0xC8C8C8; /* neutral light grey */
-	else
+	vl->raw = raw + start;
+	vl->raw_len = len;
+	vl->is_continuation = is_continuation;
+	vl->plain_len = strip_color_codes_n(vl->raw, vl->raw_len, vl->plain);
+	if(!is_continuation) {
+		char name[64];
+		int name_start = 0;
+		int name_len = extract_player_name(vl->raw, name, sizeof(name), &name_start);
+		vl->name_start = name_start;
+		vl->name_len = name_len;
+		/* Server-origin lines arrive tagged with hud_accent_color (your team
+		   color), which paints neutral announcements like "Blue captured the
+		   intel" in unreadable navy. Force light grey for lines without a
+		   leading name tag; chat from real players keeps its team color. */
+		vl->color = (name_len == 0) ? 0xC8C8C8 : color;
+	} else {
 		vl->color = color;
+	}
 	scan_urls(vl);
+}
+
+/* Split a raw chat string on '\n' and emit one visible row per segment.
+   Single-line messages take the fast path with raw_len = -1. */
+static void emit_chat_line(const char* raw, unsigned int color) {
+	if(!raw) return;
+	int start = 0, seg = 0;
+	const int MAX_SEGMENTS = 16;
+	for(int i = 0; raw[i] && seg < MAX_SEGMENTS - 1; i++) {
+		if(raw[i] == '\n') {
+			emit_chat_segment(raw, start, i - start, color, seg > 0);
+			start = i + 1;
+			seg++;
+			if(line_count >= CHATLOG_MAX_LINES) return;
+		}
+	}
+	if(seg == 0) {
+		emit_chat_segment(raw, 0, -1, color, 0);
+	} else {
+		emit_chat_segment(raw, start, (int)strlen(raw + start), color, seg > 0);
+	}
 }
 
 static void build_visible_lines(void) {
@@ -1427,9 +1513,14 @@ static void render_chat_line(mu_Context* ctx, int line_index) {
 	int plain_offset = 0;         /* count of non-color-code bytes seen so far */
 
 	for(int i = 0; ; i++) {
+		/* Stop at the segment boundary (raw_len >= 0) or at '\0' / '\n'.
+		   '\n' acts as a hard end-of-line so the second half of a
+		   newline-split message renders on its own row instead of
+		   bleeding through. */
 		unsigned char c = (unsigned char)raw[i];
-		int is_code = (c >= 1 && c <= 7);
-		int is_end  = (c == 0);
+		int is_segment_end = (vl->raw_len >= 0 && i >= vl->raw_len);
+		int is_code = (!is_segment_end) && (c >= 1 && c <= 7);
+		int is_end  = is_segment_end || (c == 0) || (c == '\n');
 		int in_url  = (!is_code && !is_end)
 					  ? (url_at_position(line_index, plain_offset) >= 0)
 					  : run_in_url;
@@ -1910,6 +2001,10 @@ static void hud_chatlog_keyboard(int key, int action, int mods, int internal) {
 	if(key == WINDOW_KEY_C && (mods || window_super_down())) {
 		copy_selection_to_clipboard();
 	}
+
+	if(internal == CHATLOG_GLFW_KEY_A && (mods || window_super_down())) {
+		select_all_lines();
+	}
 }
 
 static void hud_chatlog_mouseclick(double x, double y, int button, int action, int mods) {
@@ -2056,8 +2151,7 @@ static void hud_chatlog_mouseclick(double x, double y, int button, int action, i
 			ctxmenu_hide();
 			return;
 		}
-		/* Right-click on a player name opens the filter menu; otherwise
-		   fall back to the existing copy-selection menu. */
+		/* Priority: name -> filter menu, selection -> copy menu, else select-all. */
 		int ln = -1;
 		for(int i = 0; i < line_count; i++) {
 			mu_Rect rr = lines[i].rect;
@@ -2082,8 +2176,20 @@ static void hud_chatlog_mouseclick(double x, double y, int button, int action, i
 				return;
 			}
 		}
-		if(has_selection())
+		if(has_selection()) {
 			ctxmenu_show_copy(mx, my);
+			return;
+		}
+		if(content_body_rect.w > 0 && content_body_rect.h > 0) {
+			if(mx <  content_body_rect.x ||
+			   mx >= content_body_rect.x + content_body_rect.w ||
+			   my <  content_body_rect.y ||
+			   my >= content_body_rect.y + content_body_rect.h) {
+				return;
+			}
+		}
+		if(line_count > 0)
+			ctxmenu_show_select_all(mx, my);
 	}
 }
 

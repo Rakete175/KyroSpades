@@ -69,27 +69,51 @@ char         session_log_raw[SESSION_LOG_MAX][256];
 unsigned int session_log_color[SESSION_LOG_MAX];
 int          session_log_count = 0;
 
-void chat_add(int channel, unsigned int color, const char* msg) {
+static void chat_push_one(int channel, unsigned int color, const char* msg) {
 	memmove(chat[channel][2], chat[channel][1], sizeof(chat[channel][0]) * 125);
 	memmove(&chat_color[channel][2], &chat_color[channel][1], sizeof(chat_color[channel][0]) * 125);
 	memmove(&chat_timer[channel][2], &chat_timer[channel][1], sizeof(chat_timer[channel][0]) * 125);
-	strcpy(chat[channel][1], msg);
+	strncpy(chat[channel][1], msg, sizeof(chat[channel][1]) - 1);
+	chat[channel][1][sizeof(chat[channel][1]) - 1] = 0;
 	chat_color[channel][1] = color;
 	chat_timer[channel][1] = window_time();
-	if(channel == 0) {
-		log_info("%s", msg);
-		/* Append to session log (separate from the 128-slot live ring,
-		   which would otherwise discard old session messages on overflow
-		   and break the chatlog wall's stable scroll position). */
-		if(session_log_count >= SESSION_LOG_MAX) {
-			memmove(session_log_raw,   session_log_raw + 1,   (SESSION_LOG_MAX - 1) * sizeof(session_log_raw[0]));
-			memmove(session_log_color, session_log_color + 1, (SESSION_LOG_MAX - 1) * sizeof(session_log_color[0]));
-			session_log_count = SESSION_LOG_MAX - 1;
+}
+
+void chat_add(int channel, unsigned int color, const char* msg) {
+	/* Split on '\n' so each line gets its own slot in the live HUD;
+	   otherwise font_render would draw the second line atop the next
+	   message slot. Cap segments to keep one pathological message from
+	   evicting the entire live ring. */
+	const int MAX_SEGMENTS = 16;
+	int start = 0, seg = 0;
+	int total_len = (int)strlen(msg);
+	for(int i = 0; i <= total_len && seg < MAX_SEGMENTS - 1; i++) {
+		if(i == total_len || msg[i] == '\n') {
+			int n = i - start;
+			char buf[256];
+			if(n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
+			memcpy(buf, msg + start, n);
+			buf[n] = 0;
+			chat_push_one(channel, color, buf);
+			if(channel == 0) {
+				log_info("%s", buf);
+				if(session_log_count >= SESSION_LOG_MAX) {
+					memmove(session_log_raw,   session_log_raw + 1,
+							(SESSION_LOG_MAX - 1) * sizeof(session_log_raw[0]));
+					memmove(session_log_color, session_log_color + 1,
+							(SESSION_LOG_MAX - 1) * sizeof(session_log_color[0]));
+					session_log_count = SESSION_LOG_MAX - 1;
+				}
+				strncpy(session_log_raw[session_log_count], buf,
+						sizeof(session_log_raw[0]) - 1);
+				session_log_raw[session_log_count][sizeof(session_log_raw[0]) - 1] = 0;
+				session_log_color[session_log_count] = color;
+				session_log_count++;
+			}
+			if(i == total_len) break;
+			start = i + 1;
+			seg++;
 		}
-		strncpy(session_log_raw[session_log_count], msg, sizeof(session_log_raw[0]) - 1);
-		session_log_raw[session_log_count][sizeof(session_log_raw[0]) - 1] = 0;
-		session_log_color[session_log_count] = color;
-		session_log_count++;
 	}
 }
 
@@ -636,16 +660,28 @@ void text_input(struct window_instance* window, const char* utf8) {
 		return;
 
 	extern int chat_cursor;
-	int len = (int)strlen(chat[0][0]);
-	int cap = (int)sizeof(chat[0][0]);
-	int add = (int)strlen(utf8);
+	extern int chat_sel_anchor;
 
 	/* Reject control bytes (0x01..0x07 are inline color codes, 0x08..0x1F
 	   non-printable). \n is allowed for multi-line input. */
+	int add = (int)strlen(utf8);
 	for(int i = 0; i < add; i++) {
 		unsigned char c = (unsigned char)utf8[i];
 		if(c < 0x20 && c != '\n') return;
 	}
+
+	/* Replace selection if any. */
+	if(chat_sel_anchor >= 0 && chat_sel_anchor != chat_cursor) {
+		int lo = chat_sel_anchor < chat_cursor ? chat_sel_anchor : chat_cursor;
+		int hi = chat_sel_anchor < chat_cursor ? chat_cursor : chat_sel_anchor;
+		int len0 = (int)strlen(chat[0][0]);
+		memmove(chat[0][0] + lo, chat[0][0] + hi, len0 - hi + 1);
+		chat_cursor = lo;
+		chat_sel_anchor = -1;
+	}
+
+	int len = (int)strlen(chat[0][0]);
+	int cap = (int)sizeof(chat[0][0]);
 
 	if(len + add >= cap - 1) return;
 	if(chat_cursor < 0) chat_cursor = 0;
