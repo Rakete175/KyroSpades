@@ -2760,7 +2760,8 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 					struct PacketChatMessage msg;
 					msg.player_id = local_player_id;
 					msg.chat_type = (chat_input_mode == CHAT_ALL_INPUT) ? CHAT_ALL : CHAT_TEAM;
-					strcpy(msg.message, chat[0][0]);
+					strncpy(msg.message, chat[0][0], sizeof(msg.message) - 1);
+					msg.message[sizeof(msg.message) - 1] = '\0';
 					for(size_t i = 0; msg.message[i]; i++)
 						if(msg.message[i] == '\n') msg.message[i] = ' ';
 					network_send(PACKET_CHATMESSAGE_ID, &msg,
