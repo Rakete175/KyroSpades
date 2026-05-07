@@ -37,7 +37,6 @@
 
 void hud_common_render_for_chatlog(mu_Context* ctx);
 void hud_common_nav_for_chatlog(mu_Context* ctx, mu_Rect* frame, float scalex, float scaley);
-int  window_super_down(void);
 static void resolve_mouse_target(mu_Context* ctx, int* out_line, int* out_char);
 
 #define CHATLOG_MAX_LINES 2048
@@ -94,7 +93,7 @@ static int pending_anchor = 0;
 static int needs_scroll_to_bottom = 1;
 static intptr_t prev_top_chat_idx = -1;
 static int prev_top_chat_len = 0;
-static char prev_live_newest[256] = {0};
+static int prev_session_count = 0;
 /* Last observed chathistory_count(); used to detect prepends so we can
    anchor the scroll position only when older lines were actually loaded. */
 static int prev_history_count = 0;
@@ -1068,7 +1067,7 @@ static void search_recompute_matches(void) {
 
 	int last_line = -1;
 	for(int i = 0; i < line_count
-		&& search_match_count < CHATLOG_SEARCH_MAX_MATCHES; i++) {
+		  && search_match_count < CHATLOG_SEARCH_MAX_MATCHES; i++) {
 		/* Lines from last_line+1..i with no matches still need their
 		   start index recorded so the renderer's [start[i], start[i+1])
 		   range is well-defined. */
@@ -1583,7 +1582,7 @@ static void hud_chatlog_init(void) {
 	needs_scroll_to_bottom = 1;
 	prev_top_chat_idx = -1;
 	prev_top_chat_len = 0;
-	prev_live_newest[0] = 0;
+	prev_session_count = 0;
 	/* Reset visible-line state too. Without these, re-entering the
 	   chatlog with leftover line_count and prev_history_count from a
 	   previous session can mis-classify the first frame's growth as a
@@ -1747,11 +1746,9 @@ static void hud_chatlog_render(mu_Context* ctx, float scalex, float scaley) {
 		}
 		prev_history_count = cur_hc;
 
-		int top_idx = -1;
 		const char* top_raw = (line_count > 0) ? lines[line_count - 1].raw : NULL;
 		int top_len = (line_count > 0) ? lines[line_count - 1].plain_len : 0;
 		/* Detect appends to session_log so auto-scroll-to-bottom can fire. */
-		static int prev_session_count = 0;
 		int live_changed = (session_log_count != prev_session_count);
 		int messages_changed = live_changed
 			|| ((intptr_t)top_raw != prev_top_chat_idx)
@@ -1759,8 +1756,6 @@ static void hud_chatlog_render(mu_Context* ctx, float scalex, float scaley) {
 		prev_session_count = session_log_count;
 		prev_top_chat_idx = (intptr_t)top_raw;
 		prev_top_chat_len = top_len;
-		(void)top_idx;
-		(void)prev_live_newest;
 
 		int max_scroll_before = panel->content_size.y - panel->body.h;
 		if(max_scroll_before < 0) max_scroll_before = 0;
