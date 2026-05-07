@@ -431,7 +431,7 @@ static void ctxmenu_show_copy(int x, int y) {
 /* Width sized to the label (with horizontal padding) so longer payloads
    like "Show only messages from <long_name>" don't get clipped. */
 static int ctxmenu_label_width(const char* label) {
-	int w = (int)font_length((float)CHATLOG_TEXT_HEIGHT, label) + 24;
+	int w = (int)font_length((float)CHATLOG_TEXT_HEIGHT, (char*)label) + 24;
 	if(w < CTXMENU_W) w = CTXMENU_W;
 	return w;
 }

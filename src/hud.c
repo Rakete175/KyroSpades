@@ -751,6 +751,7 @@ y = 75.F + ((chat_messages - k + 1.F) * (16.F + settings.chat_spacing)) - settin
 if(chat_input_mode != CHAT_NO_INPUT && chat_input_rows > 1)
 y += (chat_input_rows - 1) * 16.0F;
 } else {
+x = 16.F;
 y = settings.window_height - 22.0F - 10.0F * k - k * 8.F;
 }
 
