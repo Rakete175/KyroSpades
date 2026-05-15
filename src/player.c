@@ -168,6 +168,10 @@ void player_on_held_item_change(struct Player* p) {
 }
 
 int player_can_spectate(struct Player* p) {
+	// Validate local_player_id before accessing players array
+	if(local_player_id >= PLAYERS_MAX) {
+		return 0;
+	}
 	return p->connected
 		&& ((players[local_player_id].team != TEAM_SPECTATOR && p->team == players[local_player_id].team)
 			|| (players[local_player_id].team == TEAM_SPECTATOR && p->team != TEAM_SPECTATOR));

@@ -38,5 +38,6 @@ void particle_render(void);
 void particle_create_casing(struct Player* p);
 void particle_create(unsigned int color, float x, float y, float z, float velocity, float velocity_y, int amount,
 					 float min_size, float max_size);
+void particle_create_rain(void);
 
 #endif

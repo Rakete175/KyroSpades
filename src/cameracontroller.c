@@ -411,15 +411,27 @@ void cameracontroller_spectator(float dt) {
 
 	if(cameracontroller_bodyview_mode) {
 		// check if we cant spectate the player anymore
-		for(int k = 0; k < PLAYERS_MAX * 2;
-			k++) { // a while(1) loop caused it to get stuck on map change when playing on babel
-			if(player_can_spectate(&players[cameracontroller_bodyview_player]))
+		int found = 0;
+		for(int k = 0; k < PLAYERS_MAX; k++) {
+			// Validate cameracontroller_bodyview_player before accessing players array
+			if(cameracontroller_bodyview_player >= PLAYERS_MAX) {
+				cameracontroller_bodyview_player = 0;
+			}
+			if(player_can_spectate(&players[cameracontroller_bodyview_player])) {
+				found = 1;
 				break;
+			}
 			cameracontroller_bodyview_player = (cameracontroller_bodyview_player + 1) % PLAYERS_MAX;
+		}
+		// If no valid player found, disable bodyview mode
+		if(!found) {
+			cameracontroller_bodyview_mode = 0;
 		}
 	}
 
-	if(cameracontroller_bodyview_mode && players[cameracontroller_bodyview_player].alive) {
+	// Validate cameracontroller_bodyview_player before accessing players array
+	if(cameracontroller_bodyview_mode && cameracontroller_bodyview_player < PLAYERS_MAX 
+	   && players[cameracontroller_bodyview_player].alive) {
 		struct Player* p = &players[cameracontroller_bodyview_player];
 		camera_x = p->physics.eye.x;
 		camera_y = p->physics.eye.y + player_height(p);
@@ -444,7 +456,9 @@ void cameracontroller_spectator(float dt) {
 }
 
 void cameracontroller_spectator_render() {
-	if(cameracontroller_bodyview_mode && players[cameracontroller_bodyview_player].alive) {
+	// Validate cameracontroller_bodyview_player before accessing players array
+	if(cameracontroller_bodyview_mode && cameracontroller_bodyview_player < PLAYERS_MAX 
+	   && players[cameracontroller_bodyview_player].alive) {
 		struct Player* p = &players[cameracontroller_bodyview_player];
 		float l = len3D(p->orientation_smooth.x, p->orientation_smooth.y, p->orientation_smooth.z);
 		float ox = p->orientation_smooth.x / l;
@@ -504,11 +518,22 @@ void cameracontroller_spectator_render() {
 
 void cameracontroller_bodyview(float dt) {
 	// check if we cant spectate the player anymore
-	for(int k = 0; k < PLAYERS_MAX * 2;
-		k++) { // a while(1) loop caused it to get stuck on map change when playing on babel
-		if(player_can_spectate(&players[cameracontroller_bodyview_player]))
+	int found = 0;
+	for(int k = 0; k < PLAYERS_MAX; k++) {
+		// Validate cameracontroller_bodyview_player before accessing players array
+		if(cameracontroller_bodyview_player >= PLAYERS_MAX) {
+			cameracontroller_bodyview_player = 0;
+		}
+		if(player_can_spectate(&players[cameracontroller_bodyview_player])) {
+			found = 1;
 			break;
+		}
 		cameracontroller_bodyview_player = (cameracontroller_bodyview_player + 1) % PLAYERS_MAX;
+	}
+	// If no valid player found, disable bodyview mode
+	if(!found) {
+		cameracontroller_bodyview_mode = 0;
+		return;
 	}
 
 	AABB camera = {0};
@@ -517,6 +542,10 @@ void cameracontroller_bodyview(float dt) {
 	float k;
 	float traverse_lengths[2] = {-1, -1};
 	for(k = 0.0F; k < 5.0F; k += 0.05F) {
+		// Validate cameracontroller_bodyview_player before each access
+		if(cameracontroller_bodyview_player >= PLAYERS_MAX) {
+			break;
+		}
 		aabb_set_center(&camera,
 						players[cameracontroller_bodyview_player].pos.x - sin(camera_rot_x) * sin(camera_rot_y) * k,
 						players[cameracontroller_bodyview_player].pos.y - cos(camera_rot_y) * k
@@ -545,17 +574,22 @@ void cameracontroller_bodyview(float dt) {
 		= (tmp < cameracontroller_bodyview_zoom) ? tmp : fmin(tmp, cameracontroller_bodyview_zoom + dt * 8.0F);
 
 	// this is needed to determine which chunks need/can be rendered and for sound, minimap etc...
-	camera_x = players[cameracontroller_bodyview_player].pos.x
-		- sin(camera_rot_x) * sin(camera_rot_y) * cameracontroller_bodyview_zoom;
-	camera_y = players[cameracontroller_bodyview_player].pos.y - cos(camera_rot_y) * cameracontroller_bodyview_zoom
-		+ player_height2(&players[cameracontroller_bodyview_player]);
-	camera_z = players[cameracontroller_bodyview_player].pos.z
-		- cos(camera_rot_x) * sin(camera_rot_y) * cameracontroller_bodyview_zoom;
-	camera_vx = players[cameracontroller_bodyview_player].physics.velocity.x;
-	camera_vy = players[cameracontroller_bodyview_player].physics.velocity.y;
-	camera_vz = players[cameracontroller_bodyview_player].physics.velocity.z;
+	// Validate cameracontroller_bodyview_player before accessing players array
+	if(cameracontroller_bodyview_player < PLAYERS_MAX) {
+		camera_x = players[cameracontroller_bodyview_player].pos.x
+			- sin(camera_rot_x) * sin(camera_rot_y) * cameracontroller_bodyview_zoom;
+		camera_y = players[cameracontroller_bodyview_player].pos.y - cos(camera_rot_y) * cameracontroller_bodyview_zoom
+			+ player_height2(&players[cameracontroller_bodyview_player]);
+		camera_z = players[cameracontroller_bodyview_player].pos.z
+			- cos(camera_rot_x) * sin(camera_rot_y) * cameracontroller_bodyview_zoom;
+		camera_vx = players[cameracontroller_bodyview_player].physics.velocity.x;
+		camera_vy = players[cameracontroller_bodyview_player].physics.velocity.y;
+		camera_vz = players[cameracontroller_bodyview_player].physics.velocity.z;
+	}
 
-	if(cameracontroller_bodyview_mode && players[cameracontroller_bodyview_player].alive) {
+	// Validate cameracontroller_bodyview_player before accessing players array
+	if(cameracontroller_bodyview_mode && cameracontroller_bodyview_player < PLAYERS_MAX 
+	   && players[cameracontroller_bodyview_player].alive) {
 		struct Player* p = &players[cameracontroller_bodyview_player];
 		camera_x = p->physics.eye.x;
 		camera_y = p->physics.eye.y + player_height(p);
@@ -568,7 +602,9 @@ void cameracontroller_bodyview(float dt) {
 }
 
 void cameracontroller_bodyview_render() {
-	if(cameracontroller_bodyview_mode && players[cameracontroller_bodyview_player].alive) {
+	// Validate cameracontroller_bodyview_player before accessing players array
+	if(cameracontroller_bodyview_mode && cameracontroller_bodyview_player < PLAYERS_MAX 
+	   && players[cameracontroller_bodyview_player].alive) {
 		struct Player* p = &players[cameracontroller_bodyview_player];
 		float l = sqrt(distance3D(p->orientation_smooth.x, p->orientation_smooth.y, p->orientation_smooth.z, 0, 0, 0));
 		float ox = p->orientation_smooth.x / l;
@@ -578,18 +614,21 @@ void cameracontroller_bodyview_render() {
 		matrix_lookAt(matrix_view, camera_x, camera_y, camera_z, camera_x + ox, camera_y + oy, camera_z + oz, 0.0F,
 					  1.0F, 0.0F);
 	} else {
-		matrix_lookAt(matrix_view,
-					  players[cameracontroller_bodyview_player].pos.x
-						  - sin(camera_rot_x) * sin(camera_rot_y) * cameracontroller_bodyview_zoom,
-					  players[cameracontroller_bodyview_player].pos.y
-						  - cos(camera_rot_y) * cameracontroller_bodyview_zoom
-						  + player_height2(&players[cameracontroller_bodyview_player]),
-					  players[cameracontroller_bodyview_player].pos.z
-						  - cos(camera_rot_x) * sin(camera_rot_y) * cameracontroller_bodyview_zoom,
-					  players[cameracontroller_bodyview_player].pos.x,
-					  players[cameracontroller_bodyview_player].pos.y
-						  + player_height2(&players[cameracontroller_bodyview_player]),
-					  players[cameracontroller_bodyview_player].pos.z, 0.0F, 1.0F, 0.0F);
+		// Validate cameracontroller_bodyview_player before accessing players array
+		if(cameracontroller_bodyview_player < PLAYERS_MAX) {
+			matrix_lookAt(matrix_view,
+						  players[cameracontroller_bodyview_player].pos.x
+							  - sin(camera_rot_x) * sin(camera_rot_y) * cameracontroller_bodyview_zoom,
+						  players[cameracontroller_bodyview_player].pos.y
+							  - cos(camera_rot_y) * cameracontroller_bodyview_zoom
+							  + player_height2(&players[cameracontroller_bodyview_player]),
+						  players[cameracontroller_bodyview_player].pos.z
+							  - cos(camera_rot_x) * sin(camera_rot_y) * cameracontroller_bodyview_zoom,
+						  players[cameracontroller_bodyview_player].pos.x,
+						  players[cameracontroller_bodyview_player].pos.y
+							  + player_height2(&players[cameracontroller_bodyview_player]),
+						  players[cameracontroller_bodyview_player].pos.z, 0.0F, 1.0F, 0.0F);
+		}
 	}
 }
 

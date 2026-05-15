@@ -129,6 +129,7 @@ void config_save() {
 	config_seti("client", "show_live_player_count", settings.show_live_player_count);
 	config_seti("client", "ads_zoom_animation", settings.ads_zoom_animation);
 	config_seti("client", "auto_demo_recording", settings.auto_demo_recording);
+	config_seti("client", "rain", settings.rain);
 	config_setf("client", "rifle_ads_fov", settings.rifle_ads_fov);
 	config_setf("client", "shotgun_ads_fov", settings.shotgun_ads_fov);
 	config_setf("client", "smg_ads_fov", settings.smg_ads_fov);
@@ -206,6 +207,7 @@ static int config_read_key(void* user, const char* section, const char* name, co
 		IMPORT_SETTING(settings.show_live_player_count, show_live_player_count, atoi(value));
 		IMPORT_SETTING(settings.ads_zoom_animation, ads_zoom_animation, atoi(value));
 		IMPORT_SETTING(settings.auto_demo_recording, auto_demo_recording, atoi(value));
+		IMPORT_SETTING(settings.rain, rain, atoi(value));
 		IMPORT_SETTING(settings.rifle_ads_fov, rifle_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
 		IMPORT_SETTING(settings.shotgun_ads_fov, shotgun_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
 		IMPORT_SETTING(settings.smg_ads_fov, smg_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
@@ -892,6 +894,17 @@ void config_reload() {
 				 .help = "Automatically record demo files when connecting to a server",
 				 .name = "Auto Demo Recording",
 				 .category = "KyroSpades Settings",
+			 });
+
+	list_add(&config_settings,
+			 &(struct config_setting) {
+				 .value = &settings_tmp.rain,
+				 .type = CONFIG_TYPE_INT,
+				 .min = 0,
+				 .max = 1,
+				 .help = "Enable rain weather effect",
+				 .name = "Rain",
+				 .category = "Weather",
 			 });
 
 	list_add(&config_settings,

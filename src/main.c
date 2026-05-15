@@ -226,6 +226,11 @@ void display() {
 					&& cameracontroller_bodyview_mode);
 			int is_local = (camera_mode == CAMERAMODE_FPS) || (cameracontroller_bodyview_player == local_player_id);
 			int local_id = (camera_mode == CAMERAMODE_FPS) ? local_player_id : cameracontroller_bodyview_player;
+			
+			// Validate local_id before any array access to prevent crashes in spectator mode
+			if(local_id >= PLAYERS_MAX) {
+				local_id = local_player_id;
+			}
 
 			if(players[local_player_id].items_show && window_time() - players[local_player_id].items_show_start >= 0.5F)
 				players[local_player_id].items_show = 0;
@@ -852,6 +857,9 @@ int main(int argc, char** argv) {
 				camera_update(step);
 				tracer_update(step);
 				particle_update(step);
+				if(settings.rain) {
+					particle_create_rain();
+				}
 				map_collapsing_update(step);
 			}
 		}

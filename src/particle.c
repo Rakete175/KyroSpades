@@ -32,9 +32,12 @@
 #include "config.h"
 #include "tesselator.h"
 #include "entitysystem.h"
+#include "player.h"
 
 struct entity_system particles;
 struct tesselator particle_tesselator;
+
+static float rain_timer = 0.0F;
 
 void particle_init() {
 	entitysys_create(&particles, sizeof(struct Particle), 256);
@@ -196,6 +199,54 @@ void particle_create(unsigned int color, float x, float y, float z, float veloci
 						  .vz = vz,
 						  .fade = window_time(),
 						  .color = color,
+						  .type = 255,
+					  });
+	}
+}
+
+void particle_create_rain(void) {
+	rain_timer += 0.016F;
+	if(rain_timer < 0.05F) {
+		return;
+	}
+	rain_timer = 0.0F;
+
+	struct Player* local = &players[local_player_id];
+	if(!local || !local->connected) {
+		return;
+	}
+
+	float player_x = local->pos.x;
+	float player_y = local->pos.y;
+	float player_z = local->pos.z;
+
+	float rain_height = player_y + 20.0F;
+	float render_dist = sqrtf(settings.render_distance * settings.render_distance);
+
+	int particles_per_frame = 150;
+
+	for(int i = 0; i < particles_per_frame; i++) {
+		float offset_x = (((float)rand() / (float)RAND_MAX) * 2.0F - 1.0F) * render_dist;
+		float offset_z = (((float)rand() / (float)RAND_MAX) * 2.0F - 1.0F) * render_dist;
+
+		float spawn_x = player_x + offset_x;
+		float spawn_z = player_z + offset_z;
+
+		if(spawn_x < 0 || spawn_x >= map_size_x || spawn_z < 0 || spawn_z >= map_size_z) {
+			continue;
+		}
+
+		entitysys_add(&particles,
+					  &(struct Particle) {
+						  .size = 0.15F + ((float)rand() / (float)RAND_MAX) * 0.1F,
+						  .x = spawn_x,
+						  .y = rain_height,
+						  .z = spawn_z,
+						  .vx = 0.0F,
+						  .vy = -15.0F - ((float)rand() / (float)RAND_MAX) * 5.0F,
+						  .vz = 0.0F,
+						  .fade = window_time(),
+						  .color = rgba(0x00, 0x00, 0xCC, 0xFF),
 						  .type = 255,
 					  });
 	}
