@@ -47,10 +47,15 @@ float camera_fov_scaled(float dt) {
 			&& cameracontroller_bodyview_mode);
 	int local_id = (camera_mode == CAMERAMODE_FPS) ? local_player_id : cameracontroller_bodyview_player;
 
+	// Validate local_id before any array access to prevent crashes
+	if(local_id >= PLAYERS_MAX || local_id < 0) {
+		local_id = -1;
+	}
+
 	// Calculate target FOV offset based on sprint and crouch state
 	// Only apply FOV changes when in first-person view as the local player
 	float target_fov_offset = 0.0F;
-	if(camera_mode == CAMERAMODE_FPS && local_id < PLAYERS_MAX && players[local_id].alive) {
+	if(camera_mode == CAMERAMODE_FPS && local_id >= 0 && local_id < PLAYERS_MAX && players[local_id].alive) {
 		if(players[local_id].input.keys.sprint) {
 			target_fov_offset += 20.0F;
 		}
@@ -64,7 +69,8 @@ float camera_fov_scaled(float dt) {
 	float lerp_speed = 5.0F * dt; // Adjust this value to control smoothness
 	current_fov_offset = current_fov_offset + (target_fov_offset - current_fov_offset) * fminf(lerp_speed, 1.0F);
 
-	if(render_fpv && players[local_id].held_item == TOOL_GUN && players[local_id].input.buttons.rmb
+	if(render_fpv && local_id >= 0 && local_id < PLAYERS_MAX
+	   && players[local_id].held_item == TOOL_GUN && players[local_id].input.buttons.rmb
 	   && !players[local_id].input.keys.sprint && players[local_id].alive) {
 		float ads_fov = CAMERA_DEFAULT_FOV;
 		switch(players[local_id].weapon) {
