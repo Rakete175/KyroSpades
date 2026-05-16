@@ -23,7 +23,7 @@
 #include "window.h"
 
 void reshape(struct window_instance* window, int width, int height);
-void text_input(struct window_instance* window, unsigned int codepoint);
+void text_input(struct window_instance* window, const char* utf8);
 void keys(struct window_instance* window, int key, int scancode, int action, int mods);
 void mouse_click(struct window_instance* window, int button, int action, int mods);
 void mouse(struct window_instance* window, double x, double y);

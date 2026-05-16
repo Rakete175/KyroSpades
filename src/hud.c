@@ -50,6 +50,7 @@
 #include "font.h"
 #include "sound.h"
 #include "gmi.h"
+#include "chatlog.h"
 
 struct hud* hud_active;
 struct window_instance* hud_window;
@@ -68,6 +69,7 @@ void hud_init() {
 	hud_serverlist.ctx = malloc(sizeof(mu_Context));
 	hud_settings.ctx = malloc(sizeof(mu_Context));
 	hud_controls.ctx = malloc(sizeof(mu_Context));
+	hud_chatlog.ctx = malloc(sizeof(mu_Context));
 
 	hud_change(&hud_serverlist);
 }
@@ -149,10 +151,183 @@ int show_exit = 0;
 int show_update_popup = 0;
 static char latest_ver[32];
 
+/* Multi-line chat input: cursor offset into chat[0][0] in bytes, plus
+   wrapping helpers. Buffer remains a single string (newlines never get
+   stored), but the field can wrap onto up to CHAT_INPUT_MAX_ROWS rows. */
+#define CHAT_INPUT_MAX_ROWS 3
+#define CHAT_INPUT_ROW_H 16.0F
+int chat_cursor = 0;
+int chat_input_rows = 1;
+/* Selection: -1 = none. When set and != chat_cursor, range
+   [min(anchor, cursor), max(anchor, cursor)) is the active selection. */
+int chat_sel_anchor = -1;
+static int chat_drag_active = 0;
+
+static void chat_cursor_clamp(void) {
+	int len = (int)strlen(chat[0][0]);
+	if(chat_cursor < 0) chat_cursor = 0;
+	if(chat_cursor > len) chat_cursor = len;
+	if(chat_sel_anchor > len) chat_sel_anchor = len;
+}
+
+static int chat_sel_active(void) {
+	return chat_sel_anchor >= 0 && chat_sel_anchor != chat_cursor;
+}
+
+static void chat_sel_clear(void) {
+	chat_sel_anchor = -1;
+}
+
+static void chat_sel_range(int* lo, int* hi) {
+	int a = chat_sel_anchor, b = chat_cursor;
+	if(a < 0) { *lo = *hi = b; return; }
+	if(a <= b) { *lo = a; *hi = b; } else { *lo = b; *hi = a; }
+}
+
+static int chat_sel_delete(void) {
+	if(!chat_sel_active()) return 0;
+	int lo, hi;
+	chat_sel_range(&lo, &hi);
+	int len = (int)strlen(chat[0][0]);
+	memmove(chat[0][0] + lo, chat[0][0] + hi, len - hi + 1);
+	chat_cursor = lo;
+	chat_sel_clear();
+	return 1;
+}
+
+static void chat_sel_copy_to_clipboard(void) {
+	if(!chat_sel_active()) return;
+	int lo, hi;
+	chat_sel_range(&lo, &hi);
+	char buf[260];
+	int n = hi - lo;
+	if(n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
+	memcpy(buf, chat[0][0] + lo, n);
+	buf[n] = 0;
+	window_setclipboard(buf);
+}
+
+/* Move cursor; with shift held, extend selection (seeding anchor at the
+   pre-move position if there was none). Without shift, drop selection. */
+static void chat_cursor_move_with_shift(int new_cursor, int shift_held) {
+	if(shift_held) {
+		if(chat_sel_anchor < 0) chat_sel_anchor = chat_cursor;
+	} else {
+		chat_sel_clear();
+	}
+	chat_cursor = new_cursor;
+}
+
+static int chat_wrap(float available_w, int* row_starts, int* row_lens, int max_rows) {
+	char* s = chat[0][0];
+	int len = (int)strlen(s);
+	if(len == 0) { row_starts[0] = 0; row_lens[0] = 0; return 1; }
+	int rows = 0;
+	int i = 0;
+	char tmp[260];
+	while(rows < max_rows) {
+		int start = i;
+		int last_break = -1;
+		int hard_break = -1;
+		int end = i;
+		while(end < len) {
+			if(s[end] == '\n') { hard_break = end; break; }
+			int take = end - start + 1;
+			if(take >= (int)sizeof(tmp)) break;
+			memcpy(tmp, s + start, take);
+			tmp[take] = 0;
+			if(font_length(CHAT_INPUT_ROW_H, tmp) > available_w) break;
+			if(s[end] == ' ') last_break = end;
+			end++;
+		}
+		if(hard_break >= 0) {
+			row_starts[rows] = start;
+			row_lens[rows] = hard_break - start;
+			rows++;
+			i = hard_break + 1;
+			if(i > len) break;
+			continue;
+		}
+		if(end >= len) {
+			row_starts[rows] = start;
+			row_lens[rows] = end - start;
+			rows++;
+			break;
+		}
+		int cut = (last_break > start) ? last_break + 1 : end;
+		if(cut <= start) cut = start + 1;
+		row_starts[rows] = start;
+		row_lens[rows] = cut - start;
+		rows++;
+		i = cut;
+	}
+	return rows;
+}
+
+static void chat_cursor_to_rowcol(const int* row_starts, const int* row_lens, int rows,
+								  int* out_row, int* out_col) {
+	for(int r = 0; r < rows; r++) {
+		int s = row_starts[r];
+		int e = s + row_lens[r];
+		if((chat_cursor >= s && chat_cursor < e) || (r == rows - 1 && chat_cursor >= s)) {
+			*out_row = r; *out_col = chat_cursor - s; return;
+		}
+	}
+	*out_row = rows - 1; *out_col = row_lens[rows - 1];
+}
+
+/* Map a screen-pixel mouse position (top-left origin) to a byte offset
+   in chat[0][0]. Returns -1 if outside the chat input area. */
+static int chat_input_offset_at(double sx_pixel, double sy_pixel) {
+	float sx = (float)sx_pixel;
+	float sy = (float)settings.window_height - (float)sy_pixel;
+	float avail_w = (float)settings.window_width - 11.0F - 16.0F;
+	int row_starts[CHAT_INPUT_MAX_ROWS], row_lens[CHAT_INPUT_MAX_ROWS];
+	int rows = chat_wrap(avail_w, row_starts, row_lens, CHAT_INPUT_MAX_ROWS);
+
+	float top_baseline = 69.0F + (rows - 1) * CHAT_INPUT_ROW_H;
+	if(sy < 69.0F - CHAT_INPUT_ROW_H - 4.0F || sy > top_baseline + 4.0F) return -1;
+	if(sx < 3.0F || sx > 11.0F + avail_w + 5.0F) return -1;
+
+	int picked = 0;
+	for(int r = 0; r < rows; r++) {
+		float baseline = 69.0F + (rows - 1 - r) * CHAT_INPUT_ROW_H;
+		if(sy <= baseline + 4.0F) picked = r;
+	}
+
+	int n = row_lens[picked];
+	char tmp[260];
+	if(n >= (int)sizeof(tmp)) n = (int)sizeof(tmp) - 1;
+	memcpy(tmp, chat[0][0] + row_starts[picked], n);
+	tmp[n] = 0;
+
+	float rel_x = sx - 11.0F;
+	if(rel_x <= 0.0F) return row_starts[picked];
+
+	int best = 0;
+	float best_diff = 1e9F;
+	char acc[260];
+	for(int i = 0; i <= n; i++) {
+		memcpy(acc, tmp, i);
+		acc[i] = 0;
+		float w = font_length(CHAT_INPUT_ROW_H, acc);
+		float d = fabsf(w - rel_x);
+		if(d < best_diff) { best_diff = d; best = i; }
+	}
+	int off = row_starts[picked] + best;
+	int len = (int)strlen(chat[0][0]);
+	if(off > len) off = len;
+	while(off > 0 && ((unsigned char)chat[0][0][off] & 0xC0) == 0x80) off--;
+	return off;
+}
+
+static int mouse_seed_pending = 1;
+
 static void hud_ingame_init() {
 	window_textinput(0);
 	chat_input_mode = CHAT_NO_INPUT;
 	window_mousemode(WINDOW_CURSOR_DISABLED);
+	mouse_seed_pending = 1;
 }
 
 struct player_table {
@@ -572,7 +747,11 @@ y = 75.F + ((k + 2.F) * (16.F + settings.chat_spacing)) - settings.chat_spacing 
 } else {
 y = 75.F + ((chat_messages - k + 1.F) * (16.F + settings.chat_spacing)) - settings.chat_spacing / 2.F;
 }
+/* Lift messages so a multi-row input prompt doesn't paint over them. */
+if(chat_input_mode != CHAT_NO_INPUT && chat_input_rows > 1)
+y += (chat_input_rows - 1) * 16.0F;
 } else {
+x = 16.F;
 y = settings.window_height - 22.0F - 10.0F * k - k * 8.F;
 }
 
@@ -634,9 +813,22 @@ glColor3ub(255, 255, 255);
 char buffer[512];
 unsigned int i = 0;
 for(c = chat[channel][idx]; *c != '\0'; c++) {
-// Chat color
-if(*c > 7) {
-buffer[i++] = *c;
+if((unsigned char)*c == 0xFF) {
+buffer[i] = '\0';
+float len = font_length(16.F, buffer) - 2.F;
+if(channel != 0) {
+hud_font_render(x, y, 16.F, buffer, .4F);
+} else {
+if(is_mentioned)
+glColor3ub(settings.chat_mention_r, settings.chat_mention_g, settings.chat_mention_b);
+font_render(x, y, 16.F, buffer);
+}
+x += len;
+i = 0;
+continue;
+}
+// Chat color codes are 1..7; everything else (including UTF-8 high bytes) is text.
+if((unsigned char)*c > 7) {buffer[i++] = *c;
 if(*(c + 1) != '\0') {
 continue;
 }
@@ -1296,21 +1488,69 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 			glColor3f(1.0F, 1.0F, 1.0F);
 
 			if(chat_input_mode != CHAT_NO_INPUT) {
+				chat_cursor_clamp();
+				float avail_w = (float)settings.window_width - 11.0F - 16.0F;
+				int row_starts[CHAT_INPUT_MAX_ROWS], row_lens[CHAT_INPUT_MAX_ROWS];
+				int rows = chat_wrap(avail_w, row_starts, row_lens, CHAT_INPUT_MAX_ROWS);
+				chat_input_rows = rows;
+				int cur_row = 0, cur_col = 0;
+				chat_cursor_to_rowcol(row_starts, row_lens, rows, &cur_row, &cur_col);
+				/* Render rows bottom-up so the cursor's row sits on the original
+				   baseline (y=69) and earlier wrapped rows stack above. The
+				   prefix label rides on the topmost rendered row. */
+				float top_y = 69.F + (rows - 1) * CHAT_INPUT_ROW_H;
 				switch(chat_input_mode) {
 					case CHAT_ALL_INPUT:
-						font_render(11.0F, 84.F, 16.0F,
-									"Global:");
+						font_render(11.0F, top_y + 15.F, 16.0F, "Global:");
 						break;
 					case CHAT_TEAM_INPUT:
-						font_render(11.0F, 84.F, 16.0F,
-									"Team:");
+						font_render(11.0F, top_y + 15.F, 16.0F, "Team:");
 						break;
 				}
-				int l = strlen(chat[0][0]);
-				chat[0][0][l] = '_';
-				chat[0][0][l + 1] = 0;
-				font_render(11.0F, 69.F, 16.0F, chat[0][0]);
-				chat[0][0][l] = 0;
+				char tmp[260];
+				int sel_lo = -1, sel_hi = -1;
+				if(chat_sel_active()) chat_sel_range(&sel_lo, &sel_hi);
+				for(int r = 0; r < rows; r++) {
+					float y = 69.F + (rows - 1 - r) * CHAT_INPUT_ROW_H;
+					int n = row_lens[r];
+					if(n >= (int)sizeof(tmp)) n = (int)sizeof(tmp) - 1;
+					int row_start = row_starts[r];
+					int row_end = row_start + n;
+
+					if(sel_lo >= 0 && sel_hi > sel_lo
+					   && sel_hi > row_start && sel_lo < row_end) {
+						int rl = sel_lo > row_start ? sel_lo - row_start : 0;
+						int rh = sel_hi < row_end ? sel_hi - row_start : n;
+						char pre[260], mid[260];
+						memcpy(pre, chat[0][0] + row_start, rl);
+						pre[rl] = 0;
+						memcpy(mid, chat[0][0] + row_start + rl, rh - rl);
+						mid[rh - rl] = 0;
+						float x0 = 11.0F + font_length(16.0F, pre);
+						float x1 = 11.0F + font_length(16.0F, pre) + font_length(16.0F, mid);
+						mu_Color sc = mu_color(80, 130, 220, 200);
+						glColor4ub(sc.r, sc.g, sc.b, sc.a);
+						glEnable(GL_BLEND);
+						glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+						texture_draw_empty(x0, y, x1 - x0, CHAT_INPUT_ROW_H);
+						glDisable(GL_BLEND);
+						glColor3f(1.0F, 1.0F, 1.0F);
+					}
+
+					memcpy(tmp, chat[0][0] + row_start, n);
+					tmp[n] = 0;
+					font_render(11.0F, y, 16.0F, tmp);
+					if(r == cur_row && !chat_sel_active()) {
+						int cc = chat_cursor - row_start;
+						if(cc < 0) cc = 0;
+						if(cc > n) cc = n;
+						char before[260];
+						memcpy(before, chat[0][0] + row_start, cc);
+						before[cc] = 0;
+						float cx = 11.0F + font_length(16.0F, before);
+						font_render(cx, y, 16.0F, "_");
+					}
+				}
 			}
 
 			for(int k = 0; k < chat_messages; k++) {
@@ -1737,7 +1977,20 @@ static void hud_ingame_scroll(double yoffset) {
 
 static double last_x, last_y;
 static void hud_ingame_mouselocation(double x, double y) {
-	if(chat_input_mode != CHAT_NO_INPUT || show_exit) {
+	if(chat_input_mode != CHAT_NO_INPUT) {
+		if(chat_drag_active) {
+			int off = chat_input_offset_at(x, y);
+			if(off >= 0) chat_cursor = off;
+		}
+		return;
+	}
+	if(show_exit) return;
+
+	/* Skip first delta: cursor was free in another HUD. */
+	if(mouse_seed_pending) {
+		last_x = x;
+		last_y = y;
+		mouse_seed_pending = 0;
 		return;
 	}
 
@@ -1795,9 +2048,24 @@ static void hud_switch_next_player() {
 }
 
 static void hud_ingame_mouseclick(double x, double y, int button, int action, int mods) {
-	if(chat_input_mode != CHAT_NO_INPUT || show_exit) {
+	if(chat_input_mode != CHAT_NO_INPUT) {
+		if(button == WINDOW_MOUSE_LMB) {
+			if(action == WINDOW_PRESS) {
+				int off = chat_input_offset_at(x, y);
+				if(off >= 0) {
+					chat_cursor = off;
+					chat_sel_anchor = window_shift_down() ? chat_sel_anchor : off;
+					if(chat_sel_anchor < 0) chat_sel_anchor = off;
+					chat_drag_active = 1;
+				}
+			} else if(action == WINDOW_RELEASE) {
+				chat_drag_active = 0;
+				if(chat_sel_anchor == chat_cursor) chat_sel_clear();
+			}
+		}
 		return;
 	}
+	if(show_exit) return;
 
 	if(button == WINDOW_MOUSE_LMB) {
 		button_map[0] = (action == WINDOW_PRESS);
@@ -2099,6 +2367,10 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 				chat_input_mode = CHAT_ALL_INPUT;
 				chat_scroll_offset = 0;
 				strcpy(chat[0][0], "/");
+				/* Cursor must follow the prefilled "/", otherwise stale
+				   chat_cursor (typically 0) places typed chars before the
+				   slash, producing "kill/" instead of "/kill". */
+				chat_cursor = (int)strlen(chat[0][0]);
 			}
 
 			if(key == WINDOW_KEY_CHAT) {
@@ -2342,20 +2614,144 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 		}
 	} else {
 		if(action != WINDOW_RELEASE) {
+			int shift_held = window_shift_down();
+
 			if(key == WINDOW_KEY_V && mods) {
 				const char* clipboard = window_clipboard();
-				if(clipboard)
-					strcat(chat[0][0], clipboard);
+				if(clipboard) {
+					chat_sel_delete();
+					chat_cursor_clamp();
+					size_t len = strlen(chat[0][0]);
+					size_t cap = sizeof(chat[0][0]);
+					size_t paste_len = strlen(clipboard);
+					size_t room = (len < cap - 1) ? (cap - 1 - len) : 0;
+					if(paste_len > room) paste_len = room;
+					memmove(chat[0][0] + chat_cursor + paste_len,
+							chat[0][0] + chat_cursor,
+							len - chat_cursor + 1);
+					for(size_t i = 0; i < paste_len; i++) {
+						char c = clipboard[i];
+						if(c == '\r') c = '\n';
+						else if(c == '\t') c = ' ';
+						chat[0][0][chat_cursor + i] = c;
+					}
+					chat_cursor += (int)paste_len;
+					chat_sel_clear();
+				}
+				return;
 			}
 
-			// Arrow up
-			if(key == WINDOW_KEY_HISTORY_PREVIOUS && chat_history_pos < 127) {
-				strcpy(chat[0][0], chat[2][++chat_history_pos]);
+			if(key == WINDOW_KEY_C && mods) {
+				chat_sel_copy_to_clipboard();
+				return;
 			}
 
-			// Arrow down
-			if(key == WINDOW_KEY_HISTORY_NEXT && chat_history_pos> 0) {
-				strcpy(chat[0][0], chat[2][--chat_history_pos]);
+			if(internal == 88 /* X */ && mods) {
+				if(chat_sel_active()) {
+					chat_sel_copy_to_clipboard();
+					chat_sel_delete();
+				}
+				return;
+			}
+
+			if(internal == 65 /* A */ && mods) {
+				int len = (int)strlen(chat[0][0]);
+				chat_sel_anchor = 0;
+				chat_cursor = len;
+				return;
+			}
+
+			if(key == WINDOW_KEY_HISTORY_PREVIOUS) {
+				float avail_w = (float)settings.window_width - 11.0F - 16.0F;
+				int rs[CHAT_INPUT_MAX_ROWS], rl[CHAT_INPUT_MAX_ROWS];
+				int rows = chat_wrap(avail_w, rs, rl, CHAT_INPUT_MAX_ROWS);
+				int cr = 0, cc = 0;
+				chat_cursor_to_rowcol(rs, rl, rows, &cr, &cc);
+				if(cr == 0) {
+					if(chat_history_pos < 127) {
+						strcpy(chat[0][0], chat[2][++chat_history_pos]);
+						chat_cursor = (int)strlen(chat[0][0]);
+						chat_sel_clear();
+					}
+				} else {
+					int dst = cr - 1;
+					int target = cc; if(target > rl[dst]) target = rl[dst];
+					chat_cursor_move_with_shift(rs[dst] + target, shift_held);
+				}
+			}
+
+			if(key == WINDOW_KEY_HISTORY_NEXT) {
+				float avail_w = (float)settings.window_width - 11.0F - 16.0F;
+				int rs[CHAT_INPUT_MAX_ROWS], rl[CHAT_INPUT_MAX_ROWS];
+				int rows = chat_wrap(avail_w, rs, rl, CHAT_INPUT_MAX_ROWS);
+				int cr = 0, cc = 0;
+				chat_cursor_to_rowcol(rs, rl, rows, &cr, &cc);
+				if(cr >= rows - 1) {
+					if(chat_history_pos > 0) {
+						strcpy(chat[0][0], chat[2][--chat_history_pos]);
+						chat_cursor = (int)strlen(chat[0][0]);
+						chat_sel_clear();
+					}
+				} else {
+					int dst = cr + 1;
+					int target = cc; if(target > rl[dst]) target = rl[dst];
+					chat_cursor_move_with_shift(rs[dst] + target, shift_held);
+				}
+			}
+
+			if(key == WINDOW_KEY_CURSOR_LEFT) {
+				if(chat_sel_active() && !shift_held) {
+					int lo, hi;
+					chat_sel_range(&lo, &hi);
+					chat_cursor = lo;
+					chat_sel_clear();
+				} else {
+					int new_cur = chat_cursor;
+					if(new_cur > 0) {
+						new_cur--;
+						while(new_cur > 0
+							  && ((unsigned char)chat[0][0][new_cur] & 0xC0) == 0x80)
+							new_cur--;
+					}
+					chat_cursor_move_with_shift(new_cur, shift_held);
+				}
+			}
+			if(key == WINDOW_KEY_CURSOR_RIGHT) {
+				if(chat_sel_active() && !shift_held) {
+					int lo, hi;
+					chat_sel_range(&lo, &hi);
+					chat_cursor = hi;
+					chat_sel_clear();
+				} else {
+					int len = (int)strlen(chat[0][0]);
+					int new_cur = chat_cursor;
+					if(new_cur < len) {
+						new_cur++;
+						while(new_cur < len
+							  && ((unsigned char)chat[0][0][new_cur] & 0xC0) == 0x80)
+							new_cur++;
+					}
+					chat_cursor_move_with_shift(new_cur, shift_held);
+				}
+			}
+			if(key == WINDOW_KEY_UNKNOWN) {
+				int len = (int)strlen(chat[0][0]);
+				switch(internal) {
+					case 268: chat_cursor_move_with_shift(0,   shift_held); break; /* Home */
+					case 269: chat_cursor_move_with_shift(len, shift_held); break; /* End  */
+					case 261: { /* Delete */
+						if(!chat_sel_delete() && chat_cursor < len) {
+							int del_end = chat_cursor + 1;
+							while(del_end < len
+								  && ((unsigned char)chat[0][0][del_end] & 0xC0) == 0x80)
+								del_end++;
+							memmove(chat[0][0] + chat_cursor,
+									chat[0][0] + del_end,
+									len - del_end + 1);
+						}
+						break;
+					}
+				}
 			}
 
 			if(key == WINDOW_KEY_ESCAPE || key == WINDOW_KEY_ENTER) {
@@ -2364,7 +2760,10 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 					struct PacketChatMessage msg;
 					msg.player_id = local_player_id;
 					msg.chat_type = (chat_input_mode == CHAT_ALL_INPUT) ? CHAT_ALL : CHAT_TEAM;
-					strcpy(msg.message, chat[0][0]);
+					strncpy(msg.message, chat[0][0], sizeof(msg.message) - 1);
+					msg.message[sizeof(msg.message) - 1] = '\0';
+					for(size_t i = 0; msg.message[i]; i++)
+						if(msg.message[i] == '\n') msg.message[i] = ' ';
 					network_send(PACKET_CHATMESSAGE_ID, &msg,
 								 sizeof(msg) - sizeof(msg.message) + strlen(chat[0][0]) + 1);
 					sound_create(SOUND_LOCAL, &sound_chat, 0.0F, 0.0F, 0.0F);
@@ -2374,11 +2773,24 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 				chat_input_mode = CHAT_NO_INPUT;
 				chat_scroll_offset = 0;
 				chat[0][0][0] = 0;
+				chat_cursor = 0;
+				chat_input_rows = 1;
+				chat_sel_clear();
 			}
 			if(key == WINDOW_KEY_BACKSPACE) {
-				size_t text_len = strlen(chat[0][0]);
-				if(text_len > 0) {
-					chat[0][0][text_len - 1] = 0;
+				chat_cursor_clamp();
+				if(chat_sel_delete()) {
+					/* selection consumed the keystroke */
+				} else if(chat_cursor > 0) {
+					int del_start = chat_cursor - 1;
+					while(del_start > 0
+						  && ((unsigned char)chat[0][0][del_start] & 0xC0) == 0x80)
+						del_start--;
+					size_t len = strlen(chat[0][0]);
+					memmove(chat[0][0] + del_start,
+							chat[0][0] + chat_cursor,
+							len - chat_cursor + 1);
+					chat_cursor = del_start;
 				}
 			}
 		}
@@ -2716,12 +3128,13 @@ static void hud_common_nav(mu_Context* ctx, mu_Rect* frame, float scalex, float 
 	int C = ctx->text_width(ctx->style->font, "Controls", 0) * 1.5F;
 	int D = ctx->text_width(ctx->style->font, "New updates", 0) * 1.2F;
 	int E = ctx->text_width(ctx->style->font, network_connected ? "Disconnect": "Exit", 0) * 1.5F;
+	int L = ctx->text_width(ctx->style->font, "Chat Log", 0) * 1.5F;
 
 	if(network_connected) {
 		if(serverlist_is_outdated) {
-			mu_layout_row(ctx, 5, (int[]) {B, C, D, E, -1}, 0);
+			mu_layout_row(ctx, 6, (int[]) {B, C, L, D, E, -1}, 0);
 		} else {
-			mu_layout_row(ctx, 4, (int[]) {B, C, E, -1}, 0);
+			mu_layout_row(ctx, 5, (int[]) {B, C, L, E, -1}, 0);
 		}
 	} else {
 		if(serverlist_is_outdated) {
@@ -2737,6 +3150,13 @@ static void hud_common_nav(mu_Context* ctx, mu_Rect* frame, float scalex, float 
 
 	hud_nav_button(ctx, &hud_settings, "Settings");
 	hud_nav_button(ctx, &hud_controls, "Controls");
+
+	/* Chat Log only makes sense while connected to a server (it's where the
+	   messages come from). When disconnected we hide the tab entirely so
+	   the layout collapses cleanly. */
+	if(network_connected) {
+		hud_nav_button(ctx, &hud_chatlog, "Chat Log");
+	}
 
 	if(serverlist_is_outdated) {
 		mu_text_color(ctx, 255, 255, 60);
@@ -3615,3 +4035,11 @@ struct hud hud_controls = {
 	0,
 	NULL,
 };
+
+void hud_common_render_for_chatlog(mu_Context* ctx) {
+	hud_common_render(ctx);
+}
+
+void hud_common_nav_for_chatlog(mu_Context* ctx, mu_Rect* frame, float scalex, float scaley) {
+	hud_common_nav(ctx, frame, scalex, scaley);
+}

@@ -28,7 +28,26 @@
 #include "stb_truetype.h"
 #include "utils.h"
 
-#define FONT_BAKE_START 31
+/* Codepoint ranges to bake. Latin-1 plus common symbol blocks so chat
+   like "☆" (U+2606) and arrows render properly. */
+static const struct { int first; int count; } font_ranges[] = {
+	{ 0x0020, 0x00E0 }, /* Basic Latin + Latin-1 Supplement */
+	{ 0x2000, 0x0070 }, /* General Punctuation */
+	{ 0x2070, 0x0030 }, /* Super/Subscripts */
+	{ 0x20A0, 0x0030 }, /* Currency */
+	{ 0x2100, 0x0050 }, /* Letterlike */
+	{ 0x2150, 0x0040 }, /* Number Forms */
+	{ 0x2190, 0x0070 }, /* Arrows */
+	{ 0x2200, 0x0100 }, /* Mathematical */
+	{ 0x2300, 0x0100 }, /* Misc Technical */
+	{ 0x2500, 0x0080 }, /* Box Drawing */
+	{ 0x2580, 0x0020 }, /* Block Elements */
+	{ 0x25A0, 0x0060 }, /* Geometric Shapes */
+	{ 0x2600, 0x0100 }, /* Misc Symbols (incl. ☆ U+2606) */
+	{ 0x2700, 0x00C0 }, /* Dingbats */
+	{ 0x2B00, 0x0100 }, /* Misc Symbols and Arrows */
+};
+#define FONT_RANGE_COUNT ((int)(sizeof(font_ranges) / sizeof(font_ranges[0])))
 
 static short* font_vertex_buffer;
 static short* font_coords_buffer;
@@ -46,15 +65,17 @@ struct __attribute__((packed)) font_backed_id {
 };
 
 struct font_backed_data {
-	stbtt_bakedchar* cdata;
+	stbtt_packedchar* cdata;
+	int range_offset[FONT_RANGE_COUNT];
+	int total_chars;
 	GLuint texture_id;
 	int w, h;
 };
 
 void font_init() {
-	font_vertex_buffer = malloc(512 * 8 * sizeof(short));
+	font_vertex_buffer = malloc(2048 * 8 * sizeof(short));
 	CHECK_ALLOCATION_ERROR(font_vertex_buffer)
-	font_coords_buffer = malloc(512 * 8 * sizeof(short));
+	font_coords_buffer = malloc(2048 * 8 * sizeof(short));
 	CHECK_ALLOCATION_ERROR(font_coords_buffer)
 
 	font_data_fixedsys = file_load("fonts/Fixedsys.ttf");
@@ -71,18 +92,43 @@ void font_select(enum font_type type) {
 	font_current_type = type;
 }
 
-static struct font_backed_data* font_find(float h) {
-	if(font_current_type == FONT_SMALLFNT) {
-		h *= 1.5F;
+/* Decode one codepoint, advance s. Returns 0 at terminator, 0xFFFD on
+   malformed bytes (and advances 1 byte to make progress). */
+static unsigned font_utf8_next(const char** s) {
+	const unsigned char* p = (const unsigned char*)*s;
+	unsigned c = *p;
+	if(c == 0) return 0;
+	if(c < 0x80) { *s = (const char*)(p + 1); return c; }
+	int extra; unsigned cp;
+	if((c & 0xE0) == 0xC0)      { cp = c & 0x1F; extra = 1; }
+	else if((c & 0xF0) == 0xE0) { cp = c & 0x0F; extra = 2; }
+	else if((c & 0xF8) == 0xF0) { cp = c & 0x07; extra = 3; }
+	else                        { *s = (const char*)(p + 1); return 0xFFFD; }
+	p++;
+	for(int i = 0; i < extra; i++) {
+		if((p[i] & 0xC0) != 0x80) { *s = (const char*)p; return 0xFFFD; }
+		cp = (cp << 6) | (p[i] & 0x3F);
 	}
+	*s = (const char*)(p + extra);
+	return cp;
+}
 
-	struct font_backed_id id = (struct font_backed_id) {
-		.type = font_current_type,
-		.size = h,
-	};
+static int font_glyph_index(struct font_backed_data* f, unsigned cp) {
+	for(int i = 0; i < FONT_RANGE_COUNT; i++) {
+		int first = font_ranges[i].first;
+		int cnt   = font_ranges[i].count;
+		if((int)cp >= first && (int)cp < first + cnt)
+			return f->range_offset[i] + ((int)cp - first);
+	}
+	return -1;
+}
 
+static struct font_backed_data* font_find(float h) {
+	if(font_current_type == FONT_SMALLFNT)
+		h *= 1.5F;
+
+	struct font_backed_id id = (struct font_backed_id) { .type = font_current_type, .size = h };
 	struct font_backed_data* f_cached = ht_lookup(&fonts_backed, &id);
-
 	if(f_cached)
 		return f_cached;
 
@@ -94,28 +140,43 @@ static struct font_backed_data* font_find(float h) {
 		default: return NULL;
 	}
 
+	int total = 0;
+	for(int i = 0; i < FONT_RANGE_COUNT; i++) total += font_ranges[i].count;
+
 	struct font_backed_data f;
-	f.w = 64;
-	f.h = 64;
-	f.cdata = malloc((0xFF - FONT_BAKE_START) * sizeof(stbtt_bakedchar));
+	f.total_chars = total;
+	f.cdata = malloc(total * sizeof(stbtt_packedchar));
 	CHECK_ALLOCATION_ERROR(f.cdata)
 
-	void* temp_bitmap = NULL;
+	stbtt_pack_range ranges[FONT_RANGE_COUNT];
+	int off = 0;
+	for(int i = 0; i < FONT_RANGE_COUNT; i++) {
+		ranges[i].font_size                        = h;
+		ranges[i].first_unicode_codepoint_in_range = font_ranges[i].first;
+		ranges[i].array_of_unicode_codepoints      = NULL;
+		ranges[i].num_chars                        = font_ranges[i].count;
+		ranges[i].chardata_for_range               = f.cdata + off;
+		f.range_offset[i] = off;
+		off += font_ranges[i].count;
+	}
 
 	int max_size = 0;
 	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_size);
 
+	f.w = 256;
+	f.h = 256;
+	void* temp_bitmap = NULL;
 	while(1) {
 		temp_bitmap = realloc(temp_bitmap, f.w * f.h);
 		CHECK_ALLOCATION_ERROR(temp_bitmap)
-		int res = 0;
-		res = stbtt_BakeFontBitmap(file, 0, h, temp_bitmap, f.w, f.h, FONT_BAKE_START, 0xFF - FONT_BAKE_START, f.cdata);
-		if(res > 0 || (f.w == max_size && f.h == max_size))
-			break;
-		if(f.h > f.w)
-			f.w *= 2;
-		else
-			f.h *= 2;
+		stbtt_pack_context spc;
+		if(!stbtt_PackBegin(&spc, temp_bitmap, f.w, f.h, 0, 1, NULL)) {
+			free(temp_bitmap); free(f.cdata); return NULL;
+		}
+		int ok = stbtt_PackFontRanges(&spc, file, 0, ranges, FONT_RANGE_COUNT);
+		stbtt_PackEnd(&spc);
+		if(ok || (f.w >= max_size && f.h >= max_size)) break;
+		if(f.h > f.w) f.w *= 2; else f.h *= 2;
 	}
 
 	log_info("font texsize: %i:%ipx [size %f] type: %i", f.w, f.h, h, font_current_type);
@@ -129,39 +190,34 @@ static struct font_backed_data* font_find(float h) {
 	free(temp_bitmap);
 
 	ht_insert(&fonts_backed, &id, &f);
-
 	return ht_lookup(&fonts_backed, &id);
 }
 
 float font_length(float h, char* text) {
 	struct font_backed_data* font = font_find(h);
-
-	if(!font)
-		return 0.0F;
+	if(!font) return 0.0F;
 
 	stbtt_aligned_quad q;
 	float y = h * 0.75F;
 	float x = 0.0F;
 	float length = 0.0F;
-	for(size_t k = 0; k < strlen(text); k++) {
-		if(text[k] == '\n') {
-			length = fmax(length, x);
-			x = 0.0F;
-		}
-
-		if(text[k] >= FONT_BAKE_START)
-			stbtt_GetBakedQuad(font->cdata, font->w, font->h, text[k] - FONT_BAKE_START, &x, &y, &q, 1);
+	const char* s = text;
+	for(;;) {
+		unsigned cp = font_utf8_next(&s);
+		if(cp == 0) break;
+		if(cp == '\n') { length = fmax(length, x); x = 0.0F; continue; }
+		int idx = font_glyph_index(font, cp);
+		if(idx < 0) idx = font_glyph_index(font, '?');
+		if(idx >= 0)
+			stbtt_GetPackedQuad(font->cdata, font->w, font->h, idx, &x, &y, &q, 0);
 	}
-
 	return fmax(length, x) + h * 0.125F;
 }
 
 bool font_remove_callback(void* key, void* value, void* user) {
 	struct font_backed_data* f = (struct font_backed_data*)value;
-
 	glDeleteTextures(1, &f->texture_id);
 	free(f->cdata);
-
 	return true;
 }
 
@@ -171,53 +227,52 @@ void font_reset() {
 
 void font_render(float x, float y, float h, char* text) {
 	struct font_backed_data* font = font_find(h);
-
-	if(!font)
-		return;
+	if(!font) return;
 
 	size_t k = 0;
 	float x2 = x;
 	float y2 = h * 0.75F;
-	while(*text) {
-		if(*text == '\n') {
-			x2 = x;
-			y2 += h;
-		}
+	const char* s = text;
+	for(;;) {
+		unsigned cp = font_utf8_next(&s);
+		if(cp == 0) break;
+		if(cp == '\n') { x2 = x; y2 += h; continue; }
 
-		if(*text >= FONT_BAKE_START) {
-			stbtt_aligned_quad q;
-			stbtt_GetBakedQuad(font->cdata, font->w, font->h, *text - FONT_BAKE_START, &x2, &y2, &q, 1);
-			font_coords_buffer[k + 0] = q.s0 * 8192.0F;
-			font_coords_buffer[k + 1] = q.t1 * 8192.0F;
-			font_coords_buffer[k + 2] = q.s1 * 8192.0F;
-			font_coords_buffer[k + 3] = q.t1 * 8192.0F;
-			font_coords_buffer[k + 4] = q.s1 * 8192.0F;
-			font_coords_buffer[k + 5] = q.t0 * 8192.0F;
+		int idx = font_glyph_index(font, cp);
+		if(idx < 0) idx = font_glyph_index(font, '?');
+		if(idx < 0) continue;
 
-			font_coords_buffer[k + 6] = q.s0 * 8192.0F;
-			font_coords_buffer[k + 7] = q.t1 * 8192.0F;
-			font_coords_buffer[k + 8] = q.s1 * 8192.0F;
-			font_coords_buffer[k + 9] = q.t0 * 8192.0F;
-			font_coords_buffer[k + 10] = q.s0 * 8192.0F;
-			font_coords_buffer[k + 11] = q.t0 * 8192.0F;
+		stbtt_aligned_quad q;
+		stbtt_GetPackedQuad(font->cdata, font->w, font->h, idx, &x2, &y2, &q, 0);
 
-			font_vertex_buffer[k + 0] = q.x0;
-			font_vertex_buffer[k + 1] = -q.y1 + y;
-			font_vertex_buffer[k + 2] = q.x1;
-			font_vertex_buffer[k + 3] = -q.y1 + y;
-			font_vertex_buffer[k + 4] = q.x1;
-			font_vertex_buffer[k + 5] = -q.y0 + y;
+		font_coords_buffer[k + 0] = q.s0 * 8192.0F;
+		font_coords_buffer[k + 1] = q.t1 * 8192.0F;
+		font_coords_buffer[k + 2] = q.s1 * 8192.0F;
+		font_coords_buffer[k + 3] = q.t1 * 8192.0F;
+		font_coords_buffer[k + 4] = q.s1 * 8192.0F;
+		font_coords_buffer[k + 5] = q.t0 * 8192.0F;
 
-			font_vertex_buffer[k + 6] = q.x0;
-			font_vertex_buffer[k + 7] = -q.y1 + y;
-			font_vertex_buffer[k + 8] = q.x1;
-			font_vertex_buffer[k + 9] = -q.y0 + y;
-			font_vertex_buffer[k + 10] = q.x0;
-			font_vertex_buffer[k + 11] = -q.y0 + y;
-			k += 12;
-		}
+		font_coords_buffer[k + 6] = q.s0 * 8192.0F;
+		font_coords_buffer[k + 7] = q.t1 * 8192.0F;
+		font_coords_buffer[k + 8] = q.s1 * 8192.0F;
+		font_coords_buffer[k + 9] = q.t0 * 8192.0F;
+		font_coords_buffer[k + 10] = q.s0 * 8192.0F;
+		font_coords_buffer[k + 11] = q.t0 * 8192.0F;
 
-		text++;
+		font_vertex_buffer[k + 0] = q.x0;
+		font_vertex_buffer[k + 1] = -q.y1 + y;
+		font_vertex_buffer[k + 2] = q.x1;
+		font_vertex_buffer[k + 3] = -q.y1 + y;
+		font_vertex_buffer[k + 4] = q.x1;
+		font_vertex_buffer[k + 5] = -q.y0 + y;
+
+		font_vertex_buffer[k + 6] = q.x0;
+		font_vertex_buffer[k + 7] = -q.y1 + y;
+		font_vertex_buffer[k + 8] = q.x1;
+		font_vertex_buffer[k + 9] = -q.y0 + y;
+		font_vertex_buffer[k + 10] = q.x0;
+		font_vertex_buffer[k + 11] = -q.y0 + y;
+		k += 12;
 	}
 
 	glMatrixMode(GL_TEXTURE);

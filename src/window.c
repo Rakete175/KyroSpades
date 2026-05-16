@@ -19,6 +19,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "common.h"
 #include "main.h"
@@ -29,6 +30,7 @@
 #ifdef OS_WINDOWS
 #include <sysinfoapi.h>
 #include <windows.h>
+#include <shellapi.h>
 #endif
 
 #ifdef OS_LINUX
@@ -76,7 +78,7 @@ static void window_impl_mouseclick(GLFWwindow* window, int button, int action, i
 	}
 
 	if(a >= 0)
-		mouse_click(hud_window, b, a, mods & GLFW_MOD_CONTROL);
+		mouse_click(hud_window, b, a, mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER));
 }
 static void window_impl_mouse(GLFWwindow* window, double x, double y) {
 	if(!joystick_available)
@@ -92,7 +94,24 @@ static void window_impl_reshape(GLFWwindow* window, int width, int height) {
 	reshape(hud_window, width, height);
 }
 static void window_impl_textinput(GLFWwindow* window, unsigned int codepoint) {
-	text_input(hud_window, codepoint);
+	char buf[5];
+	int n = 0;
+	if(codepoint < 0x80) { buf[n++] = (char)codepoint; }
+	else if(codepoint < 0x800) {
+		buf[n++] = 0xC0 | (codepoint >> 6);
+		buf[n++] = 0x80 | (codepoint & 0x3F);
+	} else if(codepoint < 0x10000) {
+		buf[n++] = 0xE0 | (codepoint >> 12);
+		buf[n++] = 0x80 | ((codepoint >> 6) & 0x3F);
+		buf[n++] = 0x80 | (codepoint & 0x3F);
+	} else if(codepoint < 0x110000) {
+		buf[n++] = 0xF0 | (codepoint >> 18);
+		buf[n++] = 0x80 | ((codepoint >> 12) & 0x3F);
+		buf[n++] = 0x80 | ((codepoint >> 6) & 0x3F);
+		buf[n++] = 0x80 | (codepoint & 0x3F);
+	}
+	buf[n] = 0;
+	text_input(hud_window, buf);
 }
 static void window_impl_keys(GLFWwindow* window, int key, int scancode, int action, int mods) {
 	int count = config_key_translate(key, 0, NULL);
@@ -104,19 +123,32 @@ static void window_impl_keys(GLFWwindow* window, int key, int scancode, int acti
 		case GLFW_REPEAT: a = WINDOW_REPEAT; break;
 	}
 
+	/* Cocoa occasionally drops GLFW_MOD_SUPER from the mods bitmask on
+	   Cmd-modified key events, breaking Cmd+C on macOS. Re-derive it from
+	   live key state so downstream handlers see a stable modifier bit. */
+	if(glfwGetKey(window, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS
+	   || glfwGetKey(window, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS)
+		mods |= GLFW_MOD_SUPER;
+
+#ifdef WINDOW_KEY_DEBUG
+	log_debug("key=%d scancode=%d action=%d mods=0x%x (CTRL=%d SUPER=%d)",
+			  key, scancode, action, mods,
+			  !!(mods & GLFW_MOD_CONTROL), !!(mods & GLFW_MOD_SUPER));
+#endif
+
 	if(count > 0) {
 		int results[count];
 		config_key_translate(key, 0, results);
 
 		for(int k = 0; k < count; k++) {
-			keys(hud_window, results[k], scancode, a, mods & GLFW_MOD_CONTROL);
+			keys(hud_window, results[k], scancode, a, mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER));
 
 			if(hud_active->input_keyboard)
-				hud_active->input_keyboard(results[k], action, mods & GLFW_MOD_CONTROL, key);
+				hud_active->input_keyboard(results[k], action, mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER), key);
 		}
 	} else {
 		if(hud_active->input_keyboard)
-			hud_active->input_keyboard(WINDOW_KEY_UNKNOWN, action, mods & GLFW_MOD_CONTROL, key);
+			hud_active->input_keyboard(WINDOW_KEY_UNKNOWN, action, mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER), key);
 	}
 }
 
@@ -146,8 +178,33 @@ const char* window_clipboard() {
 	return glfwGetClipboardString(hud_window->impl);
 }
 
+void window_setclipboard(const char* text) {
+	if(text)
+		glfwSetClipboardString(hud_window->impl, text);
+}
+
 int window_key_down(int key) {
 	return window_pressed_keys[key];
+}
+
+int window_super_down(void) {
+	if(!hud_window || !hud_window->impl) return 0;
+	return glfwGetKey(hud_window->impl, GLFW_KEY_LEFT_SUPER) == GLFW_PRESS
+		|| glfwGetKey(hud_window->impl, GLFW_KEY_RIGHT_SUPER) == GLFW_PRESS;
+}
+
+int window_shift_down(void) {
+	if(!hud_window || !hud_window->impl) return 0;
+	return glfwGetKey(hud_window->impl, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS
+		|| glfwGetKey(hud_window->impl, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+}
+
+static GLFWcursor* window_hand_cursor = NULL;
+void window_cursor_hand(int on) {
+	if(!hud_window || !hud_window->impl) return;
+	if(on && !window_hand_cursor)
+		window_hand_cursor = glfwCreateStandardCursor(GLFW_HAND_CURSOR);
+	glfwSetCursor(hud_window->impl, on ? window_hand_cursor : NULL);
 }
 
 void window_mousemode(int mode) {
@@ -361,12 +418,33 @@ const char* window_clipboard() {
 	return SDL_HasClipboardText() ? SDL_GetClipboardText() : NULL;
 }
 
+void window_setclipboard(const char* text) {
+	if(text)
+		SDL_SetClipboardText(text);
+}
+
 int window_key_down(int key) {
 	return window_pressed_keys[key];
 }
 
-void window_mousemode(int mode) {
-	int s = SDL_GetRelativeMouseMode();
+int window_super_down(void) {
+	const Uint8* state = SDL_GetKeyboardState(NULL);
+	if(!state) return 0;
+	return state[SDL_SCANCODE_LGUI] || state[SDL_SCANCODE_RGUI];
+}
+
+int window_shift_down(void) {
+	const Uint8* state = SDL_GetKeyboardState(NULL);
+	if(!state) return 0;
+	return state[SDL_SCANCODE_LSHIFT] || state[SDL_SCANCODE_RSHIFT];
+}
+
+static SDL_Cursor* window_hand_cursor = NULL;
+void window_cursor_hand(int on) {
+	if(on && !window_hand_cursor)
+		window_hand_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
+	SDL_SetCursor(on ? window_hand_cursor : SDL_GetDefaultCursor());
+}
 	if((s && mode == WINDOW_CURSOR_ENABLED) || (!s && mode == WINDOW_CURSOR_DISABLED))
 		SDL_SetRelativeMouseMode(mode == WINDOW_CURSOR_ENABLED ? 0 : 1);
 }
@@ -446,15 +524,15 @@ void window_update() {
 
 					for(int k = 0; k < count; k++) {
 						keys(hud_window, results[k], event.key.keysym.sym, WINDOW_PRESS,
-							 event.key.keysym.mod & KMOD_CTRL);
+							 event.key.keysym.mod & (KMOD_CTRL | KMOD_GUI));
 
 						if(hud_active->input_keyboard)
-							hud_active->input_keyboard(results[k], WINDOW_PRESS, event.key.keysym.mod & KMOD_CTRL,
+							hud_active->input_keyboard(results[k], WINDOW_PRESS, event.key.keysym.mod & (KMOD_CTRL | KMOD_GUI),
 													   event.key.keysym.sym);
 					}
 				} else {
 					if(hud_active->input_keyboard)
-						hud_active->input_keyboard(WINDOW_KEY_UNKNOWN, WINDOW_PRESS, event.key.keysym.mod & KMOD_CTRL,
+						hud_active->input_keyboard(WINDOW_KEY_UNKNOWN, WINDOW_PRESS, event.key.keysym.mod & (KMOD_CTRL | KMOD_GUI),
 												   event.key.keysym.sym);
 				}
 				break;
@@ -468,15 +546,15 @@ void window_update() {
 
 					for(int k = 0; k < count; k++) {
 						keys(hud_window, results[k], event.key.keysym.sym, WINDOW_RELEASE,
-							 event.key.keysym.mod & KMOD_CTRL);
+							 event.key.keysym.mod & (KMOD_CTRL | KMOD_GUI));
 
 						if(hud_active->input_keyboard)
-							hud_active->input_keyboard(results[k], WINDOW_RELEASE, event.key.keysym.mod & KMOD_CTRL,
+							hud_active->input_keyboard(results[k], WINDOW_RELEASE, event.key.keysym.mod & (KMOD_CTRL | KMOD_GUI),
 													   event.key.keysym.sym);
 					}
 				} else {
 					if(hud_active->input_keyboard)
-						hud_active->input_keyboard(WINDOW_KEY_UNKNOWN, WINDOW_RELEASE, event.key.keysym.mod & KMOD_CTRL,
+						hud_active->input_keyboard(WINDOW_KEY_UNKNOWN, WINDOW_RELEASE, event.key.keysym.mod & (KMOD_CTRL | KMOD_GUI),
 												   event.key.keysym.sym);
 				}
 				break;
@@ -519,7 +597,7 @@ void window_update() {
 				}
 				break;
 			}
-			case SDL_TEXTINPUT: text_input(hud_window, event.text.text[0]); break;
+			case SDL_TEXTINPUT: text_input(hud_window, event.text.text); break;
 			case SDL_FINGERDOWN:
 				if(hud_active->input_touch) {
 					struct window_finger* f;
@@ -590,6 +668,43 @@ void window_title(char* suffix) {
 }
 
 #endif
+
+/* Validate that an external URL is safe to hand to a shell. We only allow
+   http:// or https:// schemes and reject any character that could break out
+   of the quoted argument we hand to system() (quotes, backslash, control
+   chars). Returns 1 if accepted. */
+static int window_url_is_safe(const char* url) {
+	if(!url) return 0;
+	if(strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0)
+		return 0;
+	size_t len = strlen(url);
+	if(len == 0 || len > 1024) return 0;
+	for(size_t i = 0; i < len; i++) {
+		unsigned char c = (unsigned char)url[i];
+		if(c < 0x20 || c == '"' || c == '\'' || c == '\\' || c == '`' || c == '$')
+			return 0;
+	}
+	return 1;
+}
+
+void window_open_url(const char* url) {
+	if(!window_url_is_safe(url)) {
+		log_warn("window_open_url: refused unsafe URL");
+		return;
+	}
+#ifdef OS_WINDOWS
+	ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
+#else
+	char cmd[1152];
+#ifdef OS_APPLE
+	snprintf(cmd, sizeof(cmd), "open \"%s\" >/dev/null 2>&1 &", url);
+#else
+	snprintf(cmd, sizeof(cmd), "xdg-open \"%s\" >/dev/null 2>&1 &", url);
+#endif
+	int rc = system(cmd);
+	(void)rc;
+#endif
+}
 
 int window_cpucores() {
 #ifdef OS_LINUX

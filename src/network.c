@@ -48,6 +48,8 @@ int network_logged_in = 0;
 int network_map_transfer = 0;
 int network_received_packets = 0;
 int network_map_cached = 0;
+char network_current_ip[64] = {0};
+int  network_current_port = 0;
 
 float network_pos_update = 0.0F;
 struct Position network_pos_last;
@@ -100,16 +102,30 @@ const char* network_reason_disconnect(int code) {
 }
 
 static void printJoinMsg(int team, char* name) {
+	/* Default labels when StateData hasn't populated team names yet (some
+	   pyspades configs send empty team names, others arrive with the
+	   join packet ahead of the state packet on weird networks). Without
+	   the fallback, the format string collapses "%c%s\6 team" into
+	   "<color>\6 team" and the user sees "joined the   team" with two
+	   spaces and no name in between - which is the actual bug report. */
 	char* t;
 	switch(team) {
-		case TEAM_1: t = gamestate.team_1.name; break;
-		case TEAM_2: t = gamestate.team_2.name; break;
+		case TEAM_1:
+			t = (gamestate.team_1.name[0] != 0) ? gamestate.team_1.name : "Blue";
+			break;
+		case TEAM_2:
+			t = (gamestate.team_2.name[0] != 0) ? gamestate.team_2.name : "Green";
+			break;
 		default:
 		case TEAM_SPECTATOR: t = "Spectator"; break;
 	}
-	char s[64];
+	/* Buffer was previously 64 - tight against 16-char names + 10-char
+	   team names + the format scaffolding. Bumped to 128 so we don't
+	   silently truncate the closing "\6 team" off the end. */
+	char s[128];
 	char team_color = team_color_char(team);
-	sprintf(s, "%c%s\6 joined the %c%s\6 team", team_color, name, team_color, t);
+	snprintf(s, sizeof(s), "%c%s\6 joined the %c%s\6 team",
+			 team_color, name, team_color, t);
 	chat_add(0, hud_accent_color(), s);
 }
 
@@ -317,7 +333,7 @@ void read_PacketStateData(void* data, int len) {
 	chat_popup_duration = 0;
 
 	log_info("map data was %i bytes", compressed_chunk_data_offset);
-	if(!network_map_cached) {
+	if(!network_map_cached && compressed_chunk_data && compressed_chunk_data_offset > 0) {
 		int avail_size = 1024 * 1024;
 		void* decompressed = malloc(avail_size);
 		CHECK_ALLOCATION_ERROR(decompressed)
@@ -348,12 +364,11 @@ void read_PacketStateData(void* data, int len) {
 			if(r == LIBDEFLATE_BAD_DATA || r == LIBDEFLATE_SHORT_OUTPUT)
 				break;
 		}
-		free(decompressed);
-		free(compressed_chunk_data);
+free(decompressed);
 		libdeflate_free_decompressor(d);
 	}
+	compressed_chunk_data_offset = 0;
 }
-
 void read_PacketFogColor(void* data, int len) {
 	struct PacketFogColor* p = (struct PacketFogColor*)data;
 	fog_color[0] = p->red / 255.0F;
@@ -446,11 +461,14 @@ void read_PacketPlayerLeft(void* data, int len) {
 
 void read_PacketMapStart(void* data, int len) {
 	// ffs someone fix the wrong map size of 1.5mb
+	if(compressed_chunk_data) {
+		free(compressed_chunk_data);
+		compressed_chunk_data = NULL;
+	}
 	compressed_chunk_data_size = 1024 * 1024;
 	compressed_chunk_data = malloc(compressed_chunk_data_size);
 	CHECK_ALLOCATION_ERROR(compressed_chunk_data)
-	compressed_chunk_data_offset = 0;
-	network_logged_in = 0;
+	compressed_chunk_data_offset = 0;	network_logged_in = 0;
 	network_map_transfer = 1;
 	network_map_cached = 0;
 
@@ -979,6 +997,13 @@ void network_disconnect() {
 		enet_peer_disconnect(peer, 0);
 		network_connected = 0;
 		network_logged_in = 0;
+		/* Belt-and-braces: the live chat ring belongs to the just-closed
+		   session. server_c also calls chat_clear on the next connect,
+		   but clearing here too prevents any UI that runs in the
+		   disconnected interval (or a reconnect that bypasses server_c)
+		   from showing the previous server's messages. */
+		chat_clear(0);
+		chat_clear(1);
 
 		ENetEvent event;
 		while(enet_host_service(client, &event, 3000) > 0) {
@@ -1011,6 +1036,9 @@ int network_connect_sub(char* ip, int port, int version) {
 		network_received_packets = 0;
 		network_connected = 1;
 		gmi_mode = GMI_MODE_UNDETECTED;
+		strncpy(network_current_ip, ip, sizeof(network_current_ip) - 1);
+		network_current_ip[sizeof(network_current_ip) - 1] = 0;
+		network_current_port = port;
 
 		float start = window_time();
 		while(window_time() - start < 1.0F) { // listen connection for 1s, check if server disconnects

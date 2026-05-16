@@ -45,6 +45,7 @@
 #include "matrix.h"
 #include "texture.h"
 #include "chunk.h"
+#include "chatlog.h"
 #include "main.h"
 
 int fps = 0;
@@ -64,19 +65,64 @@ char chat[3][128][256] = {0}; // chat[0] is current input
 unsigned int chat_color[3][128];
 float chat_timer[3][128];
 unsigned int chat_history_pos;
-void chat_add(int channel, unsigned int color, const char* msg) {
+char         session_log_raw[SESSION_LOG_MAX][256];
+unsigned int session_log_color[SESSION_LOG_MAX];
+int          session_log_count = 0;
+
+static void chat_push_one(int channel, unsigned int color, const char* msg) {
 	memmove(chat[channel][2], chat[channel][1], sizeof(chat[channel][0]) * 125);
 	memmove(&chat_color[channel][2], &chat_color[channel][1], sizeof(chat_color[channel][0]) * 125);
 	memmove(&chat_timer[channel][2], &chat_timer[channel][1], sizeof(chat_timer[channel][0]) * 125);
-	strcpy(chat[channel][1], msg);
+	strncpy(chat[channel][1], msg, sizeof(chat[channel][1]) - 1);
+	chat[channel][1][sizeof(chat[channel][1]) - 1] = 0;
 	chat_color[channel][1] = color;
 	chat_timer[channel][1] = window_time();
-	if(channel == 0)
-		log_info("%s", msg);
+}
+
+void chat_add(int channel, unsigned int color, const char* msg) {
+	/* Split on '\n' so each line gets its own slot in the live HUD;
+	   otherwise font_render would draw the second line atop the next
+	   message slot. Cap segments to keep one pathological message from
+	   evicting the entire live ring. */
+	const int MAX_SEGMENTS = 16;
+	int start = 0, seg = 0;
+	int total_len = (int)strlen(msg);
+	for(int i = 0; i <= total_len && seg < MAX_SEGMENTS - 1; i++) {
+		if(i == total_len || msg[i] == '\n') {
+			int n = i - start;
+			char buf[256];
+			if(n > (int)sizeof(buf) - 1) n = sizeof(buf) - 1;
+			memcpy(buf, msg + start, n);
+			buf[n] = 0;
+			chat_push_one(channel, color, buf);
+			if(channel == 0) {
+				log_info("%s", buf);
+				if(session_log_count >= SESSION_LOG_MAX) {
+					memmove(session_log_raw,   session_log_raw + 1,
+							(SESSION_LOG_MAX - 1) * sizeof(session_log_raw[0]));
+					memmove(session_log_color, session_log_color + 1,
+							(SESSION_LOG_MAX - 1) * sizeof(session_log_color[0]));
+					session_log_count = SESSION_LOG_MAX - 1;
+				}
+				strncpy(session_log_raw[session_log_count], buf,
+						sizeof(session_log_raw[0]) - 1);
+				session_log_raw[session_log_count][sizeof(session_log_raw[0]) - 1] = 0;
+				session_log_color[session_log_count] = color;
+				session_log_count++;
+			}
+			if(i == total_len) break;
+			start = i + 1;
+			seg++;
+		}
+	}
 }
 
 void chat_clear(int channel) {
-	memset(chat[channel][2], 0, sizeof(chat[channel][0]) * 126);
+	memset(chat[channel][1], 0, sizeof(chat[channel][0]) * 127);
+	memset(&chat_color[channel][1], 0, sizeof(chat_color[channel][0]) * 127);
+	memset(&chat_timer[channel][1], 0, sizeof(chat_timer[channel][0]) * 127);
+	if(channel == 0)
+		session_log_count = 0;
 }
 
 char chat_popup[256] = {};
@@ -590,18 +636,61 @@ static int mu_key_translate(int key) {
 	}
 }
 
-void text_input(struct window_instance* window, unsigned int codepoint) {
+void text_input(struct window_instance* window, const char* utf8) {
+	if(!utf8 || !utf8[0]) return;
+
 	if(hud_active->ctx)
-		mu_input_text(hud_active->ctx, (char[2]) {codepoint, 0});
+		mu_input_text(hud_active->ctx, utf8);
+
+	/* Chatlog search has its own per-frame text buffer; route to it
+	   when the user is on the chatlog HUD with the search bar open.
+	   The HUD doesn't use a microui textbox (selection, context menu,
+	   and link modal are all hand-rolled there), so without this hook
+	   typed characters would feed mu_input_text above and then drop
+	   into the chat input branch below - which short-circuits anyway
+	   because chat_input_mode is always CHAT_NO_INPUT while the
+	   chatlog HUD is active. Net result: the search bar would render
+	   but never see a single character. */
+	if(hud_active == &hud_chatlog && chatlog_search_active()) {
+		chatlog_search_text_input(utf8);
+		return;
+	}
 
 	if(chat_input_mode == CHAT_NO_INPUT)
 		return;
 
-	int len = strlen(chat[0][0]);
-	if(len < 128) {
-		chat[0][0][len] = codepoint;
-		chat[0][0][len + 1] = 0;
+	extern int chat_cursor;
+	extern int chat_sel_anchor;
+
+	/* Reject control bytes (0x01..0x07 are inline color codes, 0x08..0x1F
+	   non-printable). \n is allowed for multi-line input. */
+	int add = (int)strlen(utf8);
+	for(int i = 0; i < add; i++) {
+		unsigned char c = (unsigned char)utf8[i];
+		if(c < 0x20 && c != '\n') return;
 	}
+
+	/* Replace selection if any. */
+	if(chat_sel_anchor >= 0 && chat_sel_anchor != chat_cursor) {
+		int lo = chat_sel_anchor < chat_cursor ? chat_sel_anchor : chat_cursor;
+		int hi = chat_sel_anchor < chat_cursor ? chat_cursor : chat_sel_anchor;
+		int len0 = (int)strlen(chat[0][0]);
+		memmove(chat[0][0] + lo, chat[0][0] + hi, len0 - hi + 1);
+		chat_cursor = lo;
+		chat_sel_anchor = -1;
+	}
+
+	int len = (int)strlen(chat[0][0]);
+	int cap = (int)sizeof(chat[0][0]);
+
+	if(len + add >= cap - 1) return;
+	if(chat_cursor < 0) chat_cursor = 0;
+	if(chat_cursor > len) chat_cursor = len;
+	memmove(chat[0][0] + chat_cursor + add,
+			chat[0][0] + chat_cursor,
+			len - chat_cursor + 1);
+	memcpy(chat[0][0] + chat_cursor, utf8, add);
+	chat_cursor += add;
 }
 
 void keys(struct window_instance* window, int key, int scancode, int action, int mods) {
