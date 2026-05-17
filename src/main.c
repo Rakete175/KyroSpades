@@ -949,6 +949,9 @@ int main(int argc, char** argv) {
 				if(settings.rain) {
 					particle_create_rain();
 				}
+				if(settings.snow) {
+					particle_create_snow();
+				}
 				map_collapsing_update(step);
 			}
 		}

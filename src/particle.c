@@ -38,6 +38,7 @@ struct entity_system particles;
 struct tesselator particle_tesselator;
 
 static float rain_timer = 0.0F;
+static float snow_timer = 0.0F;
 
 void particle_init() {
 	entitysys_create(&particles, sizeof(struct Particle), 256);
@@ -47,15 +48,22 @@ void particle_init() {
 static bool particle_update_single(void* obj, void* user) {
 	struct Particle* p = (struct Particle*)obj;
 	float dt = *(float*)user;
-	float size = p->size * (1.0F - ((float)(window_time() - p->fade) / 2.0F));
+	
+	// Determine fade time based on particle type (snow fades slower than rain)
+	float fade_time = (p->type == 254) ? 16.0F : 2.6F; // Snow (type 254) takes 16 seconds to fade, rain takes 2.6 (30% longer)
+	float size = p->size * (1.0F - ((float)(window_time() - p->fade) / fade_time));
 
 	if(size < 0.01F) {
 		return true;
 	} else {
 		float acc_y = -32.0F * dt;
 
-		if(map_isair(p->x, p->y + acc_y * dt - p->size / 2.0F, p->z) && !p->y + acc_y * dt < 0.0F) {
-			p->vy += acc_y;
+		// Apply gravity to all particles
+		p->vy += acc_y;
+
+		// Cap snow particle velocity to prevent accelerating too fast
+		if(p->type == 254) {
+			if(p->vy < -6.0F) p->vy = -6.0F;
 		}
 
 		float movement_x = p->vx * dt;
@@ -65,17 +73,17 @@ static bool particle_update_single(void* obj, void* user) {
 
 		if(!map_isair(p->x + movement_x, p->y, p->z)) {
 			movement_x = 0.0F;
-			p->vx = -p->vx * 0.6F;
+			if(p->type == 254) { p->vx = 0.0F; } else { p->vx = -p->vx * 0.6F; }
 			on_ground = true;
 		}
 		if(!map_isair(p->x + movement_x, p->y + movement_y, p->z)) {
 			movement_y = 0.0F;
-			p->vy = -p->vy * 0.6F;
+			if(p->type == 254) { p->vy = 0.0F; } else { p->vy = -p->vy * 0.6F; }
 			on_ground = true;
 		}
 		if(!map_isair(p->x + movement_x, p->y + movement_y, p->z + movement_z)) {
 			movement_z = 0.0F;
-			p->vz = -p->vz * 0.6F;
+			if(p->type == 254) { p->vz = 0.0F; } else { p->vz = -p->vz * 0.6F; }
 			on_ground = true;
 		}
 
@@ -119,9 +127,11 @@ static bool particle_render_single(void* obj, void* user) {
 	if(distance2D(camera_x, camera_z, p->x, p->z) > settings.render_distance * settings.render_distance)
 		return false;
 
-	float size = p->size / 2.0F * (1.0F - ((float)(window_time() - p->fade) / 2.0F));
+	// Determine fade time based on particle type (snow fades slower than rain)
+	float fade_time = (p->type == 254) ? 16.0F : 2.6F; // Snow (type 254) takes 16 seconds to fade, rain takes 2.6 (30% longer)
+	float size = p->size / 2.0F * (1.0F - ((float)(window_time() - p->fade) / fade_time));
 
-	if(p->type == 255) {
+	if(p->type == 255 || p->type == 254) {
 		tesselator_set_color(tess, p->color);
 
 		tesselator_addf_cube_face(tess, CUBE_FACE_X_N, p->x - size, p->y - size, p->z - size, size * 2.0F);
@@ -220,10 +230,10 @@ void particle_create_rain(void) {
 	float player_y = local->pos.y;
 	float player_z = local->pos.z;
 
-	float rain_height = player_y + 20.0F;
+	float rain_height = player_y + 40.0F; // Spawn twice as high (was 20.0F, now 40.0F)
 	float render_dist = sqrtf(settings.render_distance * settings.render_distance);
 
-	int particles_per_frame = 150;
+	int particles_per_frame = 225; // Increased by 50% (was 150)
 
 	for(int i = 0; i < particles_per_frame; i++) {
 		float offset_x = (((float)rand() / (float)RAND_MAX) * 2.0F - 1.0F) * render_dist;
@@ -248,6 +258,54 @@ void particle_create_rain(void) {
 						  .fade = window_time(),
 						  .color = rgba(0x00, 0x00, 0xCC, 0xFF),
 						  .type = 255,
+					  });
+	}
+}
+
+void particle_create_snow(void) {
+	snow_timer += 0.016F;
+	if(snow_timer < 0.05F) {
+		return;
+	}
+	snow_timer = 0.0F;
+
+	struct Player* local = &players[local_player_id];
+	if(!local || !local->connected) {
+		return;
+	}
+
+	float player_x = local->pos.x;
+	float player_y = local->pos.y;
+	float player_z = local->pos.z;
+
+	float snow_height = player_y + 40.0F; // Spawn twice as high (same as rain)
+	float render_dist = sqrtf(settings.render_distance * settings.render_distance);
+
+	int particles_per_frame = 225; // Increased by 50% (was 150)
+
+	for(int i = 0; i < particles_per_frame; i++) {
+		float offset_x = (((float)rand() / (float)RAND_MAX) * 2.0F - 1.0F) * render_dist;
+		float offset_z = (((float)rand() / (float)RAND_MAX) * 2.0F - 1.0F) * render_dist;
+
+		float spawn_x = player_x + offset_x;
+		float spawn_z = player_z + offset_z;
+
+		if(spawn_x < 0 || spawn_x >= map_size_x || spawn_z < 0 || spawn_z >= map_size_z) {
+			continue;
+		}
+
+		entitysys_add(&particles,
+					  &(struct Particle) {
+						  .size = 0.15F + ((float)rand() / (float)RAND_MAX) * 0.1F,
+						  .x = spawn_x,
+						  .y = snow_height,
+						  .z = spawn_z,
+						  .vx = 0.0F,
+						  .vy = -3.0F - ((float)rand() / (float)RAND_MAX) * 3.0F, // Tripled speed for snow
+						  .vz = 0.0F,
+						  .fade = window_time(),
+						  .color = rgba(0xFF, 0xFF, 0xFF, 0xFF), // White color for snow
+						  .type = 254, // Special type for snow (different fade time)
 					  });
 	}
 }

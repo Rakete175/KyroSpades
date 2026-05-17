@@ -86,6 +86,7 @@ extern struct RENDER_OPTIONS {
 	float smg_ads_fov;
 	int auto_demo_recording;
 	int rain;
+	int snow;
 } settings, settings_tmp;
 
 extern struct list config_keys;
