@@ -37,6 +37,7 @@
 #include "parson.h"
 #include "config.h"
 #include "network.h"
+#include "demo.h"
 #include "rpc.h"
 #include "map.h"
 #include "player.h"
@@ -70,6 +71,7 @@ void hud_init() {
 	hud_settings.ctx = malloc(sizeof(mu_Context));
 	hud_controls.ctx = malloc(sizeof(mu_Context));
 	hud_chatlog.ctx = malloc(sizeof(mu_Context));
+	hud_demolist.ctx = malloc(sizeof(mu_Context));
 
 	hud_change(&hud_serverlist);
 }
@@ -858,6 +860,39 @@ case '\7': glColor3ub(120, 120, 120); break; // Gray
 x += len;
 i = 0;
 }
+}
+
+static void demo_playback_render_overlay(float scalef) {
+	if(!demo_is_playing()) return;
+	float bar_w = (float)settings.window_width  * 0.6f;
+	float bar_h = 8.0f * scalef;
+	float bar_x = ((float)settings.window_width  - bar_w) * 0.5f;
+	float bar_y = (float)settings.window_height - 28.0f * scalef;
+	float progress = (DemoPlaybackState.duration > 0.0f)
+		? (DemoPlaybackState.current_time / DemoPlaybackState.duration) : 0.0f;
+	if(progress < 0.0f) progress = 0.0f;
+	if(progress > 1.0f) progress = 1.0f;
+	glDisable(GL_TEXTURE_2D); glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glColor4f(0.0f, 0.0f, 0.0f, 0.55f);
+	glBegin(GL_QUADS);
+		glVertex2f(bar_x, bar_y); glVertex2f(bar_x + bar_w, bar_y);
+		glVertex2f(bar_x + bar_w, bar_y + bar_h); glVertex2f(bar_x, bar_y + bar_h);
+	glEnd();
+	glColor4f(0.25f, 0.72f, 1.0f, 0.85f);
+	glBegin(GL_QUADS);
+		glVertex2f(bar_x, bar_y); glVertex2f(bar_x + bar_w * progress, bar_y);
+		glVertex2f(bar_x + bar_w * progress, bar_y + bar_h); glVertex2f(bar_x, bar_y + bar_h);
+	glEnd();
+	glDisable(GL_BLEND); glEnable(GL_TEXTURE_2D);
+	int cur_m = (int)(DemoPlaybackState.current_time)/60, cur_s = (int)(DemoPlaybackState.current_time)%60;
+	int dur_m = (int)(DemoPlaybackState.duration)/60, dur_s = (int)(DemoPlaybackState.duration)%60;
+	char buf[80];
+	snprintf(buf, sizeof(buf), "%d:%02d / %d:%02d  %.4gx%s",
+		cur_m, cur_s, dur_m, dur_s, (double)DemoPlaybackState.speed,
+		DemoPlaybackState.paused ? "  [PAUSED]" : (DemoPlaybackState.finished ? "  [END]" : ""));
+	glColor3f(1.0f, 1.0f, 1.0f);
+	hud_font_render(bar_x, bar_y - 18.0f * scalef, 13.0f * scalef, buf, 1.0f);
 }
 
 static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
@@ -1934,6 +1969,7 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 					  settings.window_height * 0.04F, str);
 	}
 #endif
+	demo_playback_render_overlay(scalef);
 }
 
 static void hud_ingame_scroll(double yoffset) {
@@ -2302,6 +2338,13 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 
 	if(chat_input_mode == CHAT_NO_INPUT) {
 		if(action == WINDOW_PRESS) {
+			if(demo_is_playing()) {
+				if(key == WINDOW_KEY_DEMO_PAUSE) { demo_playback_toggle_pause(); return; }
+				if(key == WINDOW_KEY_DEMO_SEEK_BACK) { demo_playback_seek(DemoPlaybackState.current_time - 10.0f); return; }
+				if(key == WINDOW_KEY_DEMO_SEEK_FWD) { demo_playback_seek(DemoPlaybackState.current_time + 10.0f); return; }
+				if(key == WINDOW_KEY_DEMO_SPEED_DOWN) { demo_playback_set_speed(DemoPlaybackState.speed * 0.5f); return; }
+				if(key == WINDOW_KEY_DEMO_SPEED_UP) { demo_playback_set_speed(DemoPlaybackState.speed * 2.0f); return; }
+			}
 			if(!network_connected) {
 				if(key == WINDOW_KEY_F1) {
 					camera_mode = CAMERAMODE_SELECTION;
@@ -3126,21 +3169,22 @@ static void hud_common_nav(mu_Context* ctx, mu_Rect* frame, float scalex, float 
 	int A = ctx->text_width(ctx->style->font, "Servers", 0) * 1.5F;
 	int B = ctx->text_width(ctx->style->font, "Settings", 0) * 1.5F;
 	int C = ctx->text_width(ctx->style->font, "Controls", 0) * 1.5F;
+	int N = ctx->text_width(ctx->style->font, "Demos", 0) * 1.5F;
 	int D = ctx->text_width(ctx->style->font, "New updates", 0) * 1.2F;
 	int E = ctx->text_width(ctx->style->font, network_connected ? "Disconnect": "Exit", 0) * 1.5F;
 	int L = ctx->text_width(ctx->style->font, "Chat Log", 0) * 1.5F;
 
 	if(network_connected) {
 		if(serverlist_is_outdated) {
-			mu_layout_row(ctx, 6, (int[]) {B, C, L, D, E, -1}, 0);
+			mu_layout_row(ctx, 7, (int[]) {B, C, N, L, D, E, -1}, 0);
 		} else {
-			mu_layout_row(ctx, 5, (int[]) {B, C, L, E, -1}, 0);
+			mu_layout_row(ctx, 6, (int[]) {B, C, N, L, E, -1}, 0);
 		}
 	} else {
 		if(serverlist_is_outdated) {
-			mu_layout_row(ctx, 6, (int[]) {A, B, C, D, E, -1}, 0);
+			mu_layout_row(ctx, 7, (int[]) {A, B, C, N, D, E, -1}, 0);
 		} else {
-			mu_layout_row(ctx, 5, (int[]) {A, B, C, E, -1}, 0);
+			mu_layout_row(ctx, 6, (int[]) {A, B, C, N, E, -1}, 0);
 		}
 	}
 
@@ -3150,6 +3194,8 @@ static void hud_common_nav(mu_Context* ctx, mu_Rect* frame, float scalex, float 
 
 	hud_nav_button(ctx, &hud_settings, "Settings");
 	hud_nav_button(ctx, &hud_controls, "Controls");
+	if(!network_connected)
+		hud_nav_button(ctx, &hud_demolist, "Demos");
 
 	/* Chat Log only makes sense while connected to a server (it's where the
 	   messages come from). When disconnected we hide the tab entirely so
@@ -3927,6 +3973,57 @@ static struct config_key_pair* hud_controls_edit;
 static void hud_controls_init() {
 	hud_controls_edit = NULL;
 }
+
+int demo_list_files(char*** out);
+static char** demo_files = NULL;
+static int    demo_file_count = 0;
+static void hud_demolist_init(void) {
+	if(!hud_demolist.ctx) hud_demolist.ctx = malloc(sizeof(mu_Context));
+	if(demo_files) { for(int i = 0; i < demo_file_count; i++) free(demo_files[i]); free(demo_files); demo_files = NULL; }
+	demo_file_count = demo_list_files(&demo_files);
+}
+static void hud_demolist_render(mu_Context* ctx, float scalex, float scaley) {
+	hud_common_render(ctx);
+	mu_Rect frame = mu_rect(settings.window_width/2.F - fminf(1024.F,settings.window_width*0.75F)/2.F, 0,
+		fminf(1024.F,settings.window_width*0.75F), settings.window_height);
+	if(mu_begin_window_ex(ctx, "Demos", frame, MU_OPT_NOFRAME|MU_OPT_NOTITLE|MU_OPT_NORESIZE)) {
+		hud_common_nav(ctx, &frame, scalex, scaley);
+		int rb = ctx->text_width(ctx->style->font, "Refresh", 0) * 1.6F;
+		mu_layout_row(ctx, 2, (int[]) {-rb, -1}, 0);
+		char count_str[64];
+		snprintf(count_str, sizeof(count_str), demo_file_count ? "%d demo%s" : "No .demo files found in demos/",
+			demo_file_count, demo_file_count == 1 ? "" : "s");
+		mu_button_ex(ctx, count_str, 0, MU_OPT_NOINTERACT);
+		if(mu_button_ex(ctx, "Refresh", 17, MU_OPT_ALIGNRIGHT)) hud_demolist_init();
+		mu_layout_row(ctx, 1, (int[]) {-1}, -1);
+		mu_begin_panel(ctx, "DemoFiles");
+		for(int i = 0; i < demo_file_count; i++) {
+			const char* slash = strrchr(demo_files[i], '/');
+			const char* name = slash ? slash+1 : demo_files[i];
+			mu_layout_row(ctx, 1, (int[]) {-1}, 0);
+			mu_push_id(ctx, &i, sizeof(i));
+			if(mu_button_ex(ctx, name, 0, MU_OPT_NOFRAME)) {
+				if(demo_playback_open(demo_files[i])) {
+					hud_change(&hud_ingame);
+					camera_mode = CAMERAMODE_SPECTATOR;
+					cameracontroller_reset_spectator_velocity();
+				}
+			}
+			mu_pop_id(ctx);
+		}
+		if(!demo_file_count) {
+			mu_layout_row(ctx, 1, (int[]) {-1}, 0);
+			mu_button_ex(ctx, "Use auto-record in Settings, or drop .demo files into demos/",
+				0, MU_OPT_NOFRAME|MU_OPT_ALIGNCENTER|MU_OPT_NOINTERACT);
+		}
+		mu_end_panel(ctx); mu_end_window(ctx);
+	}
+}
+static void hud_demolist_keyboard(int key, int action, int mods, int internal) {
+	(void)key; (void)action; (void)mods; (void)internal;
+}
+struct hud hud_demolist = { hud_demolist_init, NULL, hud_demolist_render, hud_demolist_keyboard,
+	NULL, NULL, NULL, NULL, NULL, 0, 0, NULL, };
 
 static void hud_controls_render(mu_Context* ctx, float scalex, float scaley) {
 	hud_common_render(ctx);

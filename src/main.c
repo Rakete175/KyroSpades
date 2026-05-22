@@ -30,6 +30,7 @@
 #include "window.h"
 #include "rpc.h"
 #include "network.h"
+#include "demo.h"
 #include "sound.h"
 #include "map.h"
 #include "particle.h"
@@ -934,15 +935,18 @@ int main(int argc, char** argv) {
 #define PHYSICS_STEP_TIME (1.0 / 60.0)
 			while(physics_time_fixed >= PHYSICS_STEP_TIME) {
 				physics_time_fixed -= PHYSICS_STEP_TIME;
-				player_update(PHYSICS_STEP_TIME, 1); // just physics tick
-				grenade_update(PHYSICS_STEP_TIME);
+				if(!demo_is_frozen()) {
+					player_update(PHYSICS_STEP_TIME, 1);
+					grenade_update(PHYSICS_STEP_TIME);
+				}
 			}
 
 			// these run at min. ~60fps but as fast as possible
 			double step = fmin(dt, PHYSICS_STEP_TIME);
 			while(step > 0 && physics_time_fast >= step) {
 				physics_time_fast -= step;
-				player_update(step, 0); // smooth orientation update
+				if(!demo_is_frozen())
+					player_update(step, 0);
 				camera_update(step);
 				tracer_update(step);
 				particle_update(step);

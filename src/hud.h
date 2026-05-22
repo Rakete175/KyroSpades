@@ -60,6 +60,7 @@ extern struct hud hud_serverlist;
 extern struct hud hud_settings;
 extern struct hud hud_controls;
 extern struct hud hud_chatlog;
+extern struct hud hud_demolist;
 
 extern struct hud* hud_active;
 extern struct window_instance* hud_window;

@@ -152,7 +152,36 @@ static void window_impl_keys(GLFWwindow* window, int key, int scancode, int acti
 	}
 }
 
+/* Names for keys whose backend key-name API can't resolve them (arrows and
+   other non-printable keys).  Keyed on the internal WINDOW_KEY_* enum so it
+   is independent of the SDL/GLFW backend.  Returns NULL if not handled. */
+static const char* window_internal_keyname(int internal) {
+	switch(internal) {
+		case WINDOW_KEY_CURSOR_LEFT:
+		case WINDOW_KEY_LEFT:            return "Left Arrow";
+		case WINDOW_KEY_CURSOR_RIGHT:
+		case WINDOW_KEY_RIGHT:           return "Right Arrow";
+		case WINDOW_KEY_CURSOR_UP:
+		case WINDOW_KEY_UP:              return "Up Arrow";
+		case WINDOW_KEY_CURSOR_DOWN:
+		case WINDOW_KEY_DOWN:            return "Down Arrow";
+		case WINDOW_KEY_DEMO_SEEK_BACK:  return "Left Arrow";
+		case WINDOW_KEY_DEMO_SEEK_FWD:   return "Right Arrow";
+		case WINDOW_KEY_DEMO_SPEED_DOWN: return "-";
+		case WINDOW_KEY_DEMO_SPEED_UP:   return "=";
+		default:                         return NULL;
+	}
+}
+
 void window_keyname(int keycode, char* output, size_t length) {
+	{
+		int results[8];
+		int count = config_key_translate(keycode, 0, results);
+		for(int i = 0; i < count; i++) {
+			const char* fb = window_internal_keyname(results[i]);
+			if(fb) { strncpy(output, fb, length); output[length - 1] = 0; return; }
+		}
+	}
 #ifdef OS_WINDOWS
 	GetKeyNameTextA(glfwGetKeyScancode(keycode) << 16, output, length);
 #else
@@ -404,7 +433,17 @@ void window_fromsettings() {
 }
 
 void window_keyname(int keycode, char* output, size_t length) {
-	strncpy(output, SDL_GetKeyName(keycode), length);
+	{
+		int results[8];
+		int count = config_key_translate(keycode, 0, results);
+		for(int i = 0; i < count; i++) {
+			const char* fb = window_internal_keyname(results[i]);
+			if(fb) { strncpy(output, fb, length); output[length - 1] = 0; return; }
+		}
+	}
+	const char* nm = SDL_GetKeyName(keycode);
+	if(!nm || !*nm) nm = "?";
+	strncpy(output, nm, length);
 	output[length - 1] = 0;
 }
 
