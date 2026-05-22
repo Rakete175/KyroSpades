@@ -1,12 +1,7 @@
 /*
-    Demo recording and playback for KyroSpades.
-
-    Recording: compatible with aos_replay format (unchanged from original).
-    Playback: adapted from ZeroSpades' DemoPlayer/DemoNetClient design.
-      - Packets pre-loaded for O(log n) seeking (binary search on timestamp)
-      - bootstrap_end_time prevents seeks that land before world is initialised
-      - demo_seeking suppresses side-effects during fast backward-seek replay
-      - Initial VXL snapshot allows backward seeks without re-parsing the file
+    Demo recording and playback for KyroSpades.  See demo.h for the design
+    overview.  Recording is unchanged from the original; playback is adapted
+    from ZeroSpades' DemoPlayer / DemoNetClient.
 */
 
 #include <stdio.h>
@@ -165,22 +160,22 @@ extern void (*packets[256])(void* data, int len);
 
 bool demo_is_playing(void)  { return DemoPlaybackState.active; }
 bool demo_is_seeking(void)  { return demo_seeking; }
-/* True during a seek replay: callers should suppress one-shot effects
-   (sounds, particles) but STILL replay chat / join / leave messages so
-   the chat log is complete up to the seek target. */
 bool demo_mute_effects(void) { return demo_seeking; }
 
 /* ── Game clock ───────────────────────────────────────────────────────
-   Returns a monotonic clock that equals window_time() during normal play
-   but STOPS advancing whenever the demo is frozen (paused or finished).
+   Monotonic clock that equals window_time() during normal play but STOPS
+   advancing while the demo is frozen (paused or finished).
 
    Invariant: game_time() == window_time() - g_paused_total, where
    g_paused_total is the total wall-clock time spent frozen so far.  While
-   frozen we additionally subtract the current freeze interval, so the
-   returned value holds perfectly still.  On unfreeze that interval is
-   folded into g_paused_total, so the clock resumes exactly where it
-   stopped — no backward jump, no divergence from stored timers (which are
-   themselves written using game_time()).                                  */
+   frozen we additionally subtract the current freeze interval so the value
+   holds still; on unfreeze that interval is folded into g_paused_total, so
+   the clock resumes exactly where it stopped.
+
+   game_clock_sync() owns all freeze/unfreeze bookkeeping and is called at
+   every state transition (pause/resume/finish/open/close) plus once per
+   frame from demo_playback_update().  game_time() is therefore a pure
+   getter and cheap to call many times per frame.                          */
 
 static double g_paused_total = 0.0;  /* total seconds spent frozen          */
 static double g_freeze_start = 0.0;  /* window_time() when current freeze began */
@@ -204,8 +199,6 @@ static void game_clock_sync(void) {
 }
 
 float game_time(void) {
-	/* Keep the freeze bookkeeping current even if nobody called sync yet. */
-	game_clock_sync();
 	double t = window_time() - g_paused_total;
 	if (g_is_frozen)
 		t -= window_time() - g_freeze_start; /* hold still while frozen */
@@ -316,7 +309,6 @@ bool demo_playback_open(const char* filename) {
 
     if (count == 0) {
         log_error("Demo: no packets found in '%s'", filename);
-        for (int i = 0; i < count; i++) free(pkts[i].data);
         free(pkts);
         return false;
     }
@@ -362,6 +354,11 @@ void demo_playback_close(void) {
     }
     memset(&DemoPlaybackState, 0, sizeof(DemoPlaybackState));
     demo_seeking = false;
+    /* Reset the game clock so a demo that ended while frozen doesn't leave a
+       permanent offset on game_time() for whatever runs next. */
+    g_paused_total = 0.0;
+    g_freeze_start = 0.0;
+    g_is_frozen    = false;
     network_connected  = 0;
     network_logged_in  = 0;
 }
@@ -369,7 +366,9 @@ void demo_playback_close(void) {
 /* ── Update (called every frame when demo_is_playing()) ──────────── */
 
 void demo_playback_update(void) {
-    if (!DemoPlaybackState.active || DemoPlaybackState.finished) return;
+    if (!DemoPlaybackState.active) return;
+    game_clock_sync(); /* keep the game clock's freeze bookkeeping current */
+    if (DemoPlaybackState.finished) return;
 
     double now = window_time();
     if (!DemoPlaybackState.paused) {
@@ -457,33 +456,42 @@ static void demo_fast_replay_to(float target_time) {
     demo_seeking = false;
 }
 
-/* ── Seek ─────────────────────────────────────────────────────────── */
-
+/* ── Seek ─────────────────────────────────────────────────────────── *
+ *  Forward seeks replay only the gap (current_time, target] with effects  *
+ *  muted — the world is already correct up to current_time, so there is   *
+ *  no reset and the chat log is preserved.                                *
+ *  Backward seeks rebuild the world from t=0 (clamped to bootstrap_end)   *
+ *  and replay up to the target; demo_reset_world() also wipes chat so the *
+ *  silent pass rebuilds it without duplicates.                            */
 void demo_playback_seek(float time) {
     if (!DemoPlaybackState.active) return;
 
-    /* Never seek before the bootstrap region (same as ZeroSpades). */
-    float replay_time = time;
-    if (replay_time < DemoPlaybackState.bootstrap_end_time)
-        replay_time = DemoPlaybackState.bootstrap_end_time;
-
-    /* Seeking (either direction) rebuilds the world from t=0 by replaying
-       the whole timeline up to the target.  Effects (sounds, particles) are
-       muted, but chat / join / leave messages ARE replayed so the chat log
-       is always complete up to wherever we seek to.  We clear chat first so
-       the rebuild produces exactly the messages up to the target with no
-       duplicates. */
-    if (DemoPlaybackState.initial_map_data) {
-        chat_clear(0);
-        chat_clear(1);
-        chat_clear(2);
-        demo_reset_world();
-        demo_fast_replay_to(replay_time);
-    }
-
-    /* Clamp and position the forward-playback cursor. */
     if (time < 0.0f) time = 0.0f;
     if (time > DemoPlaybackState.duration) time = DemoPlaybackState.duration;
+
+    bool backward = time < DemoPlaybackState.current_time;
+
+    if (backward && DemoPlaybackState.initial_map_data) {
+        float replay_time = (time < DemoPlaybackState.bootstrap_end_time)
+                          ? DemoPlaybackState.bootstrap_end_time : time;
+        demo_reset_world();              /* reloads map + clears chat */
+        demo_fast_replay_to(replay_time);
+    } else if (!backward) {
+        /* Forward: dispatch the in-between packets silently, starting from
+           the current cursor.  Map packets are skipped (map already loaded). */
+        demo_seeking = true;
+        for (int i = DemoPlaybackState.current_packet_index;
+             i < DemoPlaybackState.packet_count; i++) {
+            struct DemoPacketEntry* e = &DemoPlaybackState.packets[i];
+            if (e->timestamp > time) break;
+            unsigned char id = e->data[0];
+            if (id == PACKET_MAPSTART_ID || id == PACKET_MAPCHUNK_ID) continue;
+            if (packets[id])
+                (*packets[id])(e->data + 1, (int)(e->length - 1));
+        }
+        demo_seeking = false;
+    }
+
     DemoPlaybackState.current_time = time;
     DemoPlaybackState.finished     = false;
 

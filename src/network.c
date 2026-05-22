@@ -712,8 +712,7 @@ void read_PacketSetHP(void* data, int len) {
 	local_player_health = p->hp;
 	if(p->type == DAMAGE_SOURCE_GUN) {
 		local_player_last_damage_timer = window_time();
-		if(!demo_mute_effects())
-		sound_create(SOUND_LOCAL, &sound_hitplayer, 0.0F, 0.0F, 0.0F);
+		if(!demo_mute_effects()) sound_create(SOUND_LOCAL, &sound_hitplayer, 0.0F, 0.0F, 0.0F);
 	}
 	local_player_last_damage_x = p->x;
 	local_player_last_damage_y = 63.0F - p->z;
