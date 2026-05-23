@@ -3940,10 +3940,11 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
 	}
 }
 
-static void hud_settings_keyboard(int key, int action, int mods, int internal)  {
-	if(show_exit && key == WINDOW_KEY_ESCAPE) {
+static void hud_settings_keyboard(int key, int action, int mods, int internal) {
+	if(action == WINDOW_PRESS && show_exit && key == WINDOW_KEY_ESCAPE) {
 		hud_change(&hud_ingame);
-		show_exit = 1;
+		show_exit = 0;
+		window_mousemode(WINDOW_CURSOR_DISABLED);
 	}
 }
 
@@ -4112,9 +4113,10 @@ static void hud_controls_keyboard(int key, int action, int mods, int internal) {
 		config_save();
 	}
 
-	if(show_exit && key == WINDOW_KEY_ESCAPE) {
+	if(action == WINDOW_PRESS && show_exit && key == WINDOW_KEY_ESCAPE) {
 		hud_change(&hud_ingame);
-		show_exit = 1;
+		show_exit = 0;
+		window_mousemode(WINDOW_CURSOR_DISABLED);
 	}
 }
 

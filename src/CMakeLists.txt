@@ -19,6 +19,46 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(vxl)
 
+# SDL2: prefer a system install (brew, MacPorts, etc.) to avoid a full source
+# build. Fall back to FetchContent only when nothing is found.
+if(ENABLE_SDL)
+	if(APPLE)
+		# Homebrew — probe silently, no error if brew isn't present
+		execute_process(
+			COMMAND brew --prefix sdl2
+			OUTPUT_VARIABLE SDL2_BREW_PREFIX
+			OUTPUT_STRIP_TRAILING_WHITESPACE
+			ERROR_QUIET
+			RESULT_VARIABLE SDL2_BREW_RESULT
+		)
+		if(SDL2_BREW_RESULT EQUAL 0 AND SDL2_BREW_PREFIX)
+			list(APPEND CMAKE_PREFIX_PATH "${SDL2_BREW_PREFIX}")
+		endif()
+		# MacPorts
+		if(EXISTS "/opt/local/lib/pkgconfig/sdl2.pc")
+			list(APPEND CMAKE_PREFIX_PATH "/opt/local")
+		endif()
+	endif()
+
+	find_package(SDL2 QUIET)
+
+	if(SDL2_FOUND)
+		message(STATUS "SDL2: using system install")
+	else()
+		message(STATUS "SDL2: not found locally, building from source via FetchContent")
+		FetchContent_Declare(
+			SDL2
+			GIT_REPOSITORY	https://github.com/libsdl-org/SDL
+			GIT_TAG			release-2.30.10
+		)
+		set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+		set(SDL_STATIC ON  CACHE BOOL "" FORCE)
+		set(SDL_TEST   OFF CACHE BOOL "" FORCE)
+		FetchContent_MakeAvailable(SDL2)
+		set(SDL2_USE_FETCHCONTENT TRUE)
+	endif()
+endif()
+
 macro(download_file_if_it_doesnt_exist filename url)
 	set(argn ${ARGN})
 	list(LENGTH argn no_fallback)
@@ -157,8 +197,17 @@ if(ENABLE_GLFW)
 	target_compile_definitions(client PRIVATE USE_GLFW)
 endif()
 if(ENABLE_SDL)
-	find_package(SDL2 REQUIRED)
-	target_link_libraries(client ${SDL2_LIBRARY})
+	if(SDL2_USE_FETCHCONTENT)
+		# Static target from FetchContent build; includes macOS frameworks automatically
+		target_link_libraries(client SDL2::SDL2-static)
+	elseif(TARGET SDL2::SDL2)
+		# Modern cmake config from brew/MacPorts
+		target_link_libraries(client SDL2::SDL2)
+	else()
+		# Legacy FindSDL2 module fallback (older cmake, no imported targets)
+		target_link_libraries(client ${SDL2_LIBRARIES})
+		target_include_directories(client PRIVATE ${SDL2_INCLUDE_DIRS})
+	endif()
 	target_compile_definitions(client PRIVATE USE_SDL)
 endif()
 if(ENABLE_SOUND)
