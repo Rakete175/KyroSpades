@@ -130,6 +130,7 @@ static void printJoinMsg(int team, char* name) {
 }
 
 void read_PacketMapChunk(void* data, int len) {
+	if(demo_is_seeking()) return;
 	// increase allocated memory if it is not enough to store the next chunk
 	if(compressed_chunk_data_offset + len > compressed_chunk_data_size) {
 		compressed_chunk_data_size += 1024 * 1024;
@@ -215,7 +216,7 @@ void read_PacketBlockAction(void* data, int len) {
 				int col = map_get(p->x, 63 - p->z, p->y);
 				map_set(p->x, 63 - p->z, p->y, 0xFFFFFFFF);
 				map_update_physics(p->x, 63 - p->z, p->y);
-				particle_create(col, p->x + 0.5F, 63 - p->z + 0.5F, p->y + 0.5F, 2.5F, 1.0F, 8, 0.1F, 0.25F);
+				if(!demo_mute_effects()) particle_create(col, p->x + 0.5F, 63 - p->z + 0.5F, p->y + 0.5F, 2.5F, 1.0F, 8, 0.1F, 0.25F);
 			}
 			break;
 		case ACTION_GRENADE:
@@ -239,7 +240,7 @@ void read_PacketBlockAction(void* data, int len) {
 				int col = map_get(p->x, 63 - p->z, p->y);
 				map_set(p->x, 63 - p->z + 0, p->y, 0xFFFFFFFF);
 				map_update_physics(p->x, 63 - p->z + 0, p->y);
-				particle_create(col, p->x + 0.5F, 63 - p->z + 0.5F, p->y + 0.5F, 2.5F, 1.0F, 8, 0.1F, 0.25F);
+				if(!demo_mute_effects()) particle_create(col, p->x + 0.5F, 63 - p->z + 0.5F, p->y + 0.5F, 2.5F, 1.0F, 8, 0.1F, 0.25F);
 			}
 			if((63 - p->z + 1) > 1) {
 				map_set(p->x, 63 - p->z + 1, p->y, 0xFFFFFFFF);
@@ -255,7 +256,7 @@ void read_PacketBlockAction(void* data, int len) {
 							| (players[p->player_id].block.blue << 16));
 
 				if(play_sound)
-					sound_create(SOUND_WORLD, &sound_build, p->x + 0.5F, 63 - p->z + 0.5F, p->y + 0.5F);
+					if(!demo_mute_effects()) sound_create(SOUND_WORLD, &sound_build, p->x + 0.5F, 63 - p->z + 0.5F, p->y + 0.5F);
 			}
 			break;
 	}
@@ -282,7 +283,7 @@ void read_PacketBlockLine(void* data, int len) {
 			len--;
 		}
 	}
-	sound_create(SOUND_WORLD, &sound_build, (p->sx + p->ex) * 0.5F + 0.5F, (63 - p->sz + 63 - p->ez) * 0.5F + 0.5F,
+	if(!demo_mute_effects()) sound_create(SOUND_WORLD, &sound_build, (p->sx + p->ex) * 0.5F + 0.5F, (63 - p->sz + 63 - p->ez) * 0.5F + 0.5F,
 				 (p->sy + p->ey) * 0.5F + 0.5F);
 }
 
@@ -311,24 +312,42 @@ void read_PacketStateData(void* data, int len) {
 		default: log_error("Unknown gamemode!");
 	}
 
-	sound_create(SOUND_LOCAL, &sound_intro, 0.0F, 0.0F, 0.0F);
+	if(!demo_mute_effects())
+		sound_create(SOUND_LOCAL, &sound_intro, 0.0F, 0.0F, 0.0F);
 
 	fog_color[0] = p->fog_red / 255.0F;
 	fog_color[1] = p->fog_green / 255.0F;
 	fog_color[2] = p->fog_blue / 255.0F;
 
-	local_player_id = p->player_id;
-	local_player_health = 100;
-	local_player_blocks = 50;
-	local_player_grenades = 3;
-	weapon_set(false);
+	if(demo_is_playing()) {
+		if(!demo_is_seeking()) {
+			local_player_id = PLAYERS_MAX - 1;
+			player_reset(&players[local_player_id]);
+			players[local_player_id].connected = 0;
+			players[local_player_id].alive = 0;
+			players[local_player_id].team = TEAM_SPECTATOR;
+			local_player_health = 100;
+			local_player_blocks = 50;
+			local_player_grenades = 3;
+			weapon_set(false);
+			camera_mode = CAMERAMODE_SPECTATOR;
+			screen_current = SCREEN_NONE;
+			cameracontroller_reset_spectator_velocity();
+		}
+	} else {
+		local_player_id = p->player_id;
+		local_player_health = 100;
+		local_player_blocks = 50;
+		local_player_grenades = 3;
+		weapon_set(false);
 
-	players[local_player_id].block.red = 111;
-	players[local_player_id].block.green = 111;
-	players[local_player_id].block.blue = 111;
+		players[local_player_id].block.red = 111;
+		players[local_player_id].block.green = 111;
+		players[local_player_id].block.blue = 111;
 
-	camera_mode = CAMERAMODE_SELECTION;
-	screen_current = SCREEN_TEAM_SELECT;
+		camera_mode = CAMERAMODE_SELECTION;
+		screen_current = SCREEN_TEAM_SELECT;
+	}
 	network_map_transfer = 0;
 	chat_popup_duration = 0;
 
@@ -349,7 +368,9 @@ void read_PacketStateData(void* data, int len) {
 				CHECK_ALLOCATION_ERROR(decompressed)
 			}
 			if(r == LIBDEFLATE_SUCCESS) {
-				map_vxl_load(decompressed, decompressed_size);
+				demo_playback_save_initial_map(decompressed, decompressed_size);
+				if(!demo_is_seeking())
+					map_vxl_load(decompressed, decompressed_size);
 /*#ifndef USE_TOUCH
 				char filename[128];
 				sprintf(filename, "cache/%08X.vxl", libdeflate_crc32(0, decompressed, decompressed_size));
@@ -422,7 +443,7 @@ void read_PacketCreatePlayer(void* data, int len) {
 		players[p->player_id].block.blue = 111;
 		players[p->player_id].ammo = weapon_ammo(p->weapon);
 		players[p->player_id].ammo_reserved = weapon_ammo_reserved(p->weapon);
-		if(p->player_id == local_player_id) {
+		if(p->player_id == local_player_id && !demo_is_playing()) {
 			if(p->team == TEAM_SPECTATOR) {
 				camera_x = p->x;
 				camera_y = 63.0F - p->z;
@@ -460,6 +481,7 @@ void read_PacketPlayerLeft(void* data, int len) {
 }
 
 void read_PacketMapStart(void* data, int len) {
+	if(demo_is_seeking()) return;
 	// ffs someone fix the wrong map size of 1.5mb
 	if(compressed_chunk_data) {
 		free(compressed_chunk_data);
@@ -604,7 +626,8 @@ void read_PacketKillAction(void* data, int len) {
 			local_player_death_time = window_time();
 			local_player_respawn_time = p->respawn_time;
 			local_player_respawn_cnt_last = 255;
-			sound_create(SOUND_LOCAL, &sound_death, 0.0F, 0.0F, 0.0F);
+			if(!demo_mute_effects())
+				sound_create(SOUND_LOCAL, &sound_death, 0.0F, 0.0F, 0.0F);
 
 			if(p->player_id != p->killer_id) {
 				local_player_last_damage_timer = local_player_death_time;
@@ -689,7 +712,7 @@ void read_PacketSetHP(void* data, int len) {
 	local_player_health = p->hp;
 	if(p->type == DAMAGE_SOURCE_GUN) {
 		local_player_last_damage_timer = window_time();
-		sound_create(SOUND_LOCAL, &sound_hitplayer, 0.0F, 0.0F, 0.0F);
+		if(!demo_mute_effects()) sound_create(SOUND_LOCAL, &sound_hitplayer, 0.0F, 0.0F, 0.0F);
 	}
 	local_player_last_damage_x = p->x;
 	local_player_last_damage_y = 63.0F - p->z;
@@ -702,7 +725,8 @@ void read_PacketRestock(void* data, int len) {
 	local_player_blocks = 50;
 	local_player_grenades = 3;
 	weapon_set(true);
-	sound_create(SOUND_LOCAL, &sound_switch, 0.0F, 0.0F, 0.0F);
+	if(!demo_mute_effects())
+		sound_create(SOUND_LOCAL, &sound_switch, 0.0F, 0.0F, 0.0F);
 }
 
 void read_PacketChangeWeapon(void* data, int len) {
@@ -722,7 +746,7 @@ void read_PacketWeaponReload(void* data, int len) {
 		local_player_ammo = p->ammo;
 		local_player_ammo_reserved = p->reserved;
 	} else {
-		sound_create_sticky(weapon_sound_reload(players[p->player_id].weapon), players + p->player_id, p->player_id);
+		if(!demo_mute_effects()) sound_create_sticky(weapon_sound_reload(players[p->player_id].weapon), players + p->player_id, p->player_id);
 		// dont use values from packet which somehow are never correct
 		players[p->player_id].ammo = weapon_ammo(players[p->player_id].weapon);
 		players[p->player_id].ammo_reserved = weapon_ammo_reserved(players[p->player_id].weapon);
@@ -779,7 +803,7 @@ void read_PacketIntelCapture(void* data, int len) {
 				sprintf(capture_str, "\2%s\6 has captured the \1%s\6 Intel", players[p->player_id].name, gamestate.team_1.name);
 				break;
 		}
-		sound_create(SOUND_LOCAL, p->winning ? &sound_horn : &sound_pickup, 0.0F, 0.0F, 0.0F);
+		if(!demo_mute_effects()) sound_create(SOUND_LOCAL, p->winning ? &sound_horn : &sound_pickup, 0.0F, 0.0F, 0.0F);
 		players[p->player_id].score += 10;
 		chat_add(0, hud_accent_color(), capture_str);
 		if(p->winning) {
@@ -840,7 +864,7 @@ void read_PacketIntelPickup(void* data, int len) {
 				break;
 		}
 		chat_add(0, hud_accent_color(), pickup_str);
-		sound_create(SOUND_LOCAL, &sound_pickup, 0.0F, 0.0F, 0.0F);
+		if(!demo_mute_effects()) sound_create(SOUND_LOCAL, &sound_pickup, 0.0F, 0.0F, 0.0F);
 	}
 }
 
@@ -848,7 +872,7 @@ void read_PacketTerritoryCapture(void* data, int len) {
 	struct PacketTerritoryCapture* p = (struct PacketTerritoryCapture*)data;
 	if(gamestate.gamemode_type == GAMEMODE_TC && p->tent < gamestate.gamemode.tc.territory_count) {
 		gamestate.gamemode.tc.territory[p->tent].team = p->team;
-		sound_create(SOUND_LOCAL, p->winning ? &sound_horn : &sound_pickup, 0.0F, 0.0F, 0.0F);
+		if(!demo_mute_effects()) sound_create(SOUND_LOCAL, p->winning ? &sound_horn : &sound_pickup, 0.0F, 0.0F, 0.0F);
 		char x = (int)(gamestate.gamemode.tc.territory[p->tent].x / 64.0F) + 'A';
 		char y = (int)(gamestate.gamemode.tc.territory[p->tent].y / 64.0F) + '1';
 		char capture_str[128];
@@ -980,6 +1004,7 @@ void network_updateColor() {
 
 unsigned char network_send_tmp[512];
 void network_send(int id, void* data, int len) {
+	if(demo_is_playing()) return;
 	if(network_connected) {
 		network_stats[0].outgoing += len + 1;
 		network_send_tmp[0] = id;
@@ -993,6 +1018,10 @@ unsigned int network_ping() {
 }
 
 void network_disconnect() {
+	if(demo_is_playing()) {
+		demo_playback_close();
+		return;
+	}
 	if(network_connected) {
 		enet_peer_disconnect(peer, 0);
 		network_connected = 0;
@@ -1106,6 +1135,10 @@ int network_connect_string(char* addr) {
 }
 
 int network_update() {
+	if(demo_is_playing()) {
+		demo_playback_update();
+		return 1;
+	}
 	if(network_connected) {
 		if(window_time() - network_stats_last >= 1.0F) {
 			for(int k = 39; k > 0; k--)

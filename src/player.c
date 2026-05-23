@@ -18,6 +18,7 @@
 */
 
 #include <stdlib.h>
+#include "demo.h"
 #include <math.h>
 #include <limits.h>
 
@@ -157,13 +158,13 @@ void player_reset(struct Player* p) {
 
 void player_on_held_item_change(struct Player* p) {
 	if(p->input.buttons.lmb)
-		p->input.buttons.lmb_start = window_time() + 0.8F;
+		p->input.buttons.lmb_start = game_time() + 0.8F;
 	if(p->input.buttons.rmb)
-		p->input.buttons.rmb_start = window_time() + 0.8F;
+		p->input.buttons.rmb_start = game_time() + 0.8F;
 
-	p->item_disabled = window_time();
-	p->items_show_start = window_time();
-	p->item_showup = window_time() + 0.3F;
+	p->item_disabled = game_time();
+	p->items_show_start = game_time();
+	p->item_showup = game_time() + 0.3F;
 	p->items_show = 1;
 }
 
@@ -191,7 +192,7 @@ float* player_tool_func(const struct Player* p) {
 	ret[0] = ret[1] = ret[2] = 0.0F;
 	switch(p->held_item) {
 		case TOOL_SPADE: {
-			float t = window_time() - p->spade_use_timer;
+			float t = game_time() - p->spade_use_timer;
 			if(p->spade_use_type == 1 && t > 0.2F) {
 				return ret;
 			}
@@ -222,18 +223,18 @@ float* player_tool_func(const struct Player* p) {
 				}
 			} else {
 				if(p->input.buttons.lmb) {
-					ret[0] = (player_swing_func((window_time() - p->spade_use_timer) * 2.5F) + 1.0F) / 2.0F * 60.0F;
+					ret[0] = (player_swing_func((game_time() - p->spade_use_timer) * 2.5F) + 1.0F) / 2.0F * 60.0F;
 					return ret;
 				}
 				if(p->input.buttons.rmb) {
-					ret[0] = (player_swing_func((window_time() - p->spade_use_timer) * 0.5F) + 1.0F) / 2.0F * 60.0F;
+					ret[0] = (player_swing_func((game_time() - p->spade_use_timer) * 0.5F) + 1.0F) / 2.0F * 60.0F;
 					return ret;
 				}
 			}
 		}
 			// case TOOL_GRENADE:
 			/*if(p->input.buttons.lmb && p!=&players[local_player_id]) {
-				ret[0] = max(-(window_time()-p->input.buttons.lmb_start)*35.0F,-35.0F);
+				ret[0] = max(-(game_time()-p->input.buttons.lmb_start)*35.0F,-35.0F);
 				return ret;
 			} else {
 				return ret;
@@ -246,19 +247,19 @@ float* player_tool_translate_func(struct Player* p) {
 	static float ret[3];
 	ret[0] = ret[1] = ret[2] = 0.0F;
 	if(p == &players[local_player_id] && camera_mode == CAMERAMODE_FPS) {
-		if(window_time() - p->item_showup < 0.5F) {
+		if(game_time() - p->item_showup < 0.5F) {
 			return ret;
 		}
 		if(p->held_item == TOOL_GUN
-		   && window_time() - weapon_last_shot < weapon_delay(players[local_player_id].weapon)) {
-			ret[2] = -(weapon_delay(players[local_player_id].weapon) - (window_time() - weapon_last_shot))
+		   && game_time() - weapon_last_shot < weapon_delay(players[local_player_id].weapon)) {
+			ret[2] = -(weapon_delay(players[local_player_id].weapon) - (game_time() - weapon_last_shot))
 				/ weapon_delay(players[local_player_id].weapon) * weapon_recoil_anim(players[local_player_id].weapon)
 				* (local_player_ammo > 0);
 			return ret;
 		}
 
 		if(p->held_item == TOOL_SPADE) {
-			float t = window_time() - p->spade_use_timer;
+			float t = game_time() - p->spade_use_timer;
 			if(t > 1.0F) {
 				return ret;
 			}
@@ -275,7 +276,7 @@ float* player_tool_translate_func(struct Player* p) {
 		}
 		if(p->held_item == TOOL_GRENADE) {
 			if(p->input.buttons.lmb) {
-				ret[1] = (window_time() - p->input.buttons.lmb_start) * 1.3F;
+				ret[1] = (game_time() - p->input.buttons.lmb_start) * 1.3F;
 				ret[0] = -ret[1];
 				return ret;
 			} else {
@@ -385,10 +386,10 @@ void player_render_all() {
 		}
 		if(players[k].alive && players[k].held_item == TOOL_SPADE
 		   && (players[k].input.buttons.lmb || players[k].input.buttons.rmb)
-		   && window_time() - players[k].item_showup >= 0.5F) {
+		   && game_time() - players[k].item_showup >= 0.5F) {
 			// now run a hitscan and see if any block or player is in the way
 			struct Camera_HitType hit;
-			if(players[k].input.buttons.lmb && window_time() - players[k].spade_use_timer > 0.2F) {
+			if(players[k].input.buttons.lmb && game_time() - players[k].spade_use_timer > 0.2F) {
 				camera_hit_fromplayer(&hit, k, 4.0F);
 				if(hit.y == 0 && hit.type == CAMERA_HITTYPE_BLOCK)
 					hit.type = CAMERA_HITTYPE_NONE;
@@ -431,10 +432,10 @@ void player_render_all() {
 				}
 				players[k].spade_use_type = 1;
 				players[k].spade_used = 1;
-				players[k].spade_use_timer = window_time();
+				players[k].spade_use_timer = game_time();
 			}
 
-			if(players[k].input.buttons.rmb && window_time() - players[k].spade_use_timer > 1.0F) {
+			if(players[k].input.buttons.rmb && game_time() - players[k].spade_use_timer > 1.0F) {
 				if(players[k].spade_used) {
 					camera_hit_fromplayer(&hit, k, 4.0F);
 					if(hit.type == CAMERA_HITTYPE_BLOCK && hit.y > 1) {
@@ -454,7 +455,7 @@ void player_render_all() {
 				}
 				players[k].spade_use_type = 2;
 				players[k].spade_used = 1;
-				players[k].spade_use_timer = window_time();
+				players[k].spade_use_timer = game_time();
 			}
 		}
 		if(k != local_player_id) {
@@ -480,7 +481,7 @@ void player_render_all() {
 			}
 
 			if(players[k].alive && players[k].held_item == TOOL_GUN && players[k].input.buttons.lmb) {
-				if(window_time() - players[k].gun_shoot_timer > weapon_delay(players[k].weapon)
+				if(game_time() - players[k].gun_shoot_timer > weapon_delay(players[k].weapon)
 				   && players[k].ammo > 0) {
 					players[k].ammo--;
 					sound_create_sticky(weapon_sound(players[k].weapon), players + k, k);
@@ -517,7 +518,7 @@ void player_render_all() {
 											2.5F, 1.0F, 4, 0.1F, 0.25F);
 							break;
 					}
-					players[k].gun_shoot_timer = window_time();
+					players[k].gun_shoot_timer = game_time();
 				}
 			}
 		}
@@ -525,7 +526,7 @@ void player_render_all() {
 }
 
 static float foot_function(const struct Player* p) {
-	float f = (window_time() - p->sound.feet_started_cycle) / (p->input.keys.sprint ? (0.5F / 1.3F) : 0.5F);
+	float f = (game_time() - p->sound.feet_started_cycle) / (p->input.keys.sprint ? (0.5F / 1.3F) : 0.5F);
 	f = f * 2.0F - 1.0F;
 	return p->sound.feet_cylce ? f : -f;
 }
@@ -748,7 +749,7 @@ void player_render(struct Player* p, int id) {
 			matrix_pointAt(matrix_model, ox, 0.0F, oz);
 			matrix_rotate(matrix_model, 90.0F, 0.0F, 1.0F, 0.0F);
 			if(p->physics.velocity.y < 0.05F && p->pos.y < 1.5F)
-				matrix_translate(matrix_model, 0.0F, (sin(window_time() * 1.5F) - 1.0F) * 0.1F, 0.0F);
+				matrix_translate(matrix_model, 0.0F, (sin(game_time() * 1.5F) - 1.0F) * 0.1F, 0.0F);
 			matrix_upload();
 			if(esp_active) {
 				if(obscured || !in_view) {
@@ -766,7 +767,7 @@ void player_render(struct Player* p, int id) {
 		return;
 	}
 
-	float time = window_time() * 1000.0F;
+	float time = game_time() * 1000.0F;
 
 	struct kv6_t* torso = p->input.keys.crouch ? &model_playertorsoc : &model_playertorso;
 	struct kv6_t* leg = p->input.keys.crouch ? &model_playerlegc : &model_playerleg;
@@ -914,8 +915,8 @@ void player_render(struct Player* p, int id) {
 	if(p->input.keys.sprint && !p->input.keys.crouch)
 		matrix_rotate(matrix_model, 45.0F, 1.0F, 0.0F, 0.0F);
 
-	if(render_fpv && window_time() - p->item_showup < 0.5F)
-		matrix_rotate(matrix_model, 45.0F - (window_time() - p->item_showup) * 90.0F, 1.0F, 0.0F, 0.0F);
+	if(render_fpv && game_time() - p->item_showup < 0.5F)
+		matrix_rotate(matrix_model, 45.0F - (game_time() - p->item_showup) * 90.0F, 1.0F, 0.0F, 0.0F);
 
 	if(!(p->held_item == TOOL_SPADE && render_fpv && camera_mode == CAMERAMODE_FPS)) {
 		float* angles = player_tool_func(p);
@@ -937,7 +938,7 @@ void player_render(struct Player* p, int id) {
 	}
 
 	matrix_translate(matrix_model, -3.5F * 0.1F + 0.01F, 0.0F, 10 * 0.1F);
-	if(p->held_item == TOOL_SPADE && render_fpv && window_time() - p->item_showup >= 0.5F) {
+	if(p->held_item == TOOL_SPADE && render_fpv && game_time() - p->item_showup >= 0.5F) {
 		float* angles = player_tool_func(p);
 		matrix_translate(matrix_model, 0.0F, (model_spade.zpiv - model_spade.zsiz) * 0.05F, 0.0F);
 		matrix_rotate(matrix_model, angles[0], 1.0F, 0.0F, 0.0F);
@@ -1011,7 +1012,7 @@ void player_reposition(struct Player* p) {
 	p->physics.eye.x = p->pos.x;
 	p->physics.eye.y = p->pos.y;
 	p->physics.eye.z = p->pos.z;
-	float f = p->physics.lastclimb - window_time();
+	float f = p->physics.lastclimb - game_time();
 	if(f > -0.25F && !p->input.keys.crouch) {
 		p->physics.eye.z += (f + 0.25F) / 0.25F;
 		if(&players[local_player_id] == p) {
@@ -1127,7 +1128,7 @@ void player_boxclipmove(struct Player* p, float fsynctics) {
 	if(climb) {
 		p->physics.velocity.x *= 0.5f;
 		p->physics.velocity.y *= 0.5f;
-		p->physics.lastclimb = window_time();
+		p->physics.lastclimb = game_time();
 		nz--;
 		m = -1.35f;
 	} else {
@@ -1253,7 +1254,7 @@ int player_move(struct Player* p, float fsynctics, int id) {
 	player_coordsystem_adjust2(p);
 
 	if(p->input.keys.up || p->input.keys.down || p->input.keys.left || p->input.keys.right) {
-		if(window_time() - p->sound.feet_started > (p->input.keys.sprint ? (0.5F / 1.3F) : 0.5F)
+		if(game_time() - p->sound.feet_started > (p->input.keys.sprint ? (0.5F / 1.3F) : 0.5F)
 		   && (!p->input.keys.crouch && !p->input.keys.sneak) && !p->physics.airborne
 		   && pow(p->physics.velocity.x, 2.0F) + pow(p->physics.velocity.z, 2.0F) > pow(0.125F, 2.0F)) {
 			struct Sound_wav* footstep = (struct Sound_wav*[]) {
@@ -1267,10 +1268,10 @@ int player_move(struct Player* p, float fsynctics, int id) {
 				sound_create_sticky(footstep, p, id);
 			}
 
-			p->sound.feet_started = window_time();
+			p->sound.feet_started = game_time();
 		}
-		if(window_time() - p->sound.feet_started_cycle > (p->input.keys.sprint ? (0.5F / 1.3F) : 0.5F)) {
-			p->sound.feet_started_cycle = window_time();
+		if(game_time() - p->sound.feet_started_cycle > (p->input.keys.sprint ? (0.5F / 1.3F) : 0.5F)) {
+			p->sound.feet_started_cycle = game_time();
 			p->sound.feet_cylce = !p->sound.feet_cylce;
 		}
 	}

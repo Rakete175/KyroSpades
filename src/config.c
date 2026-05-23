@@ -391,6 +391,11 @@ void config_reload() {
 	config_register_key(WINDOW_KEY_SWITCH_CAMERA, SDLK_v, "switch_camera", 0, "Toggle 1st/3rd person view", "Spectator");
 	config_register_key(WINDOW_KEY_NEXT_PLAYER, SDLK_p, "next_player", 0, "Next alive player", "Spectator");
 	config_register_key(WINDOW_KEY_ROLL_CW, SDLK_e, "roll_cw", 0, "Roll clockwise", "Spectator");
+	config_register_key(WINDOW_KEY_DEMO_PAUSE,      SDLK_r,      "demo_pause",      0, "Play / pause",            "Watch Demo");
+	config_register_key(WINDOW_KEY_DEMO_SEEK_BACK,  SDLK_LEFT,   "demo_seek_back",  0, "Skip back 10 seconds",    "Watch Demo");
+	config_register_key(WINDOW_KEY_DEMO_SEEK_FWD,   SDLK_RIGHT,  "demo_seek_fwd",   0, "Skip forward 10 seconds", "Watch Demo");
+	config_register_key(WINDOW_KEY_DEMO_SPEED_DOWN, SDLK_MINUS,  "demo_speed_down", 0, "Half playback speed",     "Watch Demo");
+	config_register_key(WINDOW_KEY_DEMO_SPEED_UP,   SDLK_EQUALS, "demo_speed_up",   0, "Double playback speed",   "Watch Demo");
 	config_register_key(WINDOW_KEY_ROLL_CCW, SDLK_q, "roll_ccw", 0, "Roll counter-clockwise", "Spectator");
 #endif
 
@@ -449,6 +454,11 @@ void config_reload() {
 	config_register_key(WINDOW_KEY_SWITCH_CAMERA, GLFW_KEY_V, "switch_camera", 0, "Toggle 1st/3rd person view", "Spectator");
 	config_register_key(WINDOW_KEY_NEXT_PLAYER, GLFW_KEY_P, "next_player", 0, "Next alive player", "Spectator");
 	config_register_key(WINDOW_KEY_ROLL_CW, GLFW_KEY_E, "roll_cw", 0, "Roll clockwise", "Spectator");
+	config_register_key(WINDOW_KEY_DEMO_PAUSE,      GLFW_KEY_R,     "demo_pause",      0, "Play / pause",            "Watch Demo");
+	config_register_key(WINDOW_KEY_DEMO_SEEK_BACK,  GLFW_KEY_LEFT,  "demo_seek_back",  0, "Skip back 10 seconds",    "Watch Demo");
+	config_register_key(WINDOW_KEY_DEMO_SEEK_FWD,   GLFW_KEY_RIGHT, "demo_seek_fwd",   0, "Skip forward 10 seconds", "Watch Demo");
+	config_register_key(WINDOW_KEY_DEMO_SPEED_DOWN, GLFW_KEY_MINUS, "demo_speed_down", 0, "Half playback speed",     "Watch Demo");
+	config_register_key(WINDOW_KEY_DEMO_SPEED_UP,   GLFW_KEY_EQUAL, "demo_speed_up",   0, "Double playback speed",   "Watch Demo");
 	config_register_key(WINDOW_KEY_ROLL_CCW, GLFW_KEY_Q, "roll_ccw", 0, "Roll counter-clockwise", "Spectator");
 #endif
 
