@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout your fork
@@ -34,8 +36,13 @@ jobs:
             mingw-w64-ucrt-x86_64-enet
             mingw-w64-ucrt-x86_64-libdeflate
             mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-png2ico
             zip
             make
+      - name: Convert PNG to ICO
+        shell: msys2 {0}
+        run: |
+          png2ico resources/icon.ico resources/icon.png
       - name: Apply Windows fixes
         shell: msys2 {0}
         run: |
@@ -43,7 +50,6 @@ jobs:
           sed -i '1s/^/#include <sys\/stat.h>\n/' src/texture.c || true
           sed -i 's/if(entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {/struct stat st; char _stat_path[512]; snprintf(_stat_path, sizeof(_stat_path), "%s\/%s", bg_folder, entry->d_name); stat(_stat_path, \&st); if(S_ISREG(st.st_mode)) {/g' src/texture.c || true
           sed -i 's/mkdir(dir_path, 0755)/mkdir(dir_path)/' src/demo.c || true
-          python3 fix_icon.py || true
       - name: Build
         shell: msys2 {0}
         run: |
