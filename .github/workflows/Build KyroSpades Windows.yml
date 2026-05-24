@@ -69,6 +69,6 @@ jobs:
           tag_name: build-${{ steps.date.outputs.date }}
           name: KyroSpades ${{ steps.date.outputs.date }}
           files: build/KyroSpades-win64.zip
-          body: Automated daily build synced from upstream KyroSpades.
+          body: Latest verion of the game compiled for Windows and Linux.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
