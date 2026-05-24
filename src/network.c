@@ -249,6 +249,9 @@ void read_PacketBlockAction(void* data, int len) {
 			break;
 		case ACTION_BUILD:
 			if(p->player_id < PLAYERS_MAX) {
+				if(settings.player_stats && p->player_id == local_player_id) {
+					player_stats_blocks_placed++;
+				}
 				bool play_sound = map_isair(p->x, 63 - p->z, p->y);
 
 				map_set(p->x, 63 - p->z, p->y,
@@ -266,6 +269,15 @@ void read_PacketBlockLine(void* data, int len) {
 	struct PacketBlockLine* p = (struct PacketBlockLine*)data;
 	if(p->player_id >= PLAYERS_MAX) {
 		return;
+	}
+	if(settings.player_stats && p->player_id == local_player_id) {
+		if(p->sx == p->ex && p->sy == p->ey && p->sz == p->ez) {
+			player_stats_blocks_placed++;
+		} else {
+			struct Point blocks[64];
+			int blen = map_cube_line(p->sx, p->sy, p->sz, p->ex, p->ey, p->ez, blocks);
+			player_stats_blocks_placed += blen;
+		}
 	}
 	if(p->sx == p->ex && p->sy == p->ey && p->sz == p->ez) {
 		map_set(p->sx, 63 - p->sz, p->sy,
@@ -646,6 +658,19 @@ void read_PacketKillAction(void* data, int len) {
 		if(p->player_id != p->killer_id) {
 			players[p->killer_id].score++;
 		}
+
+		if(settings.player_stats) {
+			if(p->killer_id == local_player_id) {
+				player_stats_kills++;
+				if(p->kill_type == KILLTYPE_HEADSHOT) {
+					player_stats_headshots++;
+				}
+			}
+			if(p->player_id == local_player_id) {
+				player_stats_deaths++;
+			}
+		}
+
 		char* gun_name[3] = {"Rifle", "SMG", "Shotgun"};
 		char m[256];
 
@@ -1022,6 +1047,7 @@ void network_disconnect() {
 		demo_playback_close();
 		return;
 	}
+	player_stats_reset();
 	if(network_connected) {
 		enet_peer_disconnect(peer, 0);
 		network_connected = 0;

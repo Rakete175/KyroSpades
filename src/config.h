@@ -85,6 +85,7 @@ extern struct RENDER_OPTIONS {
 	float shotgun_ads_fov;
 	float smg_ads_fov;
 	int auto_demo_recording;
+	int player_stats;
 	int rain;
 	int snow;
 	int snow_3d;

@@ -36,6 +36,7 @@
 #include "weapon.h"
 #include "window.h"
 #include "particle.h"
+#include "hud.h"
 
 struct GameState gamestate;
 
@@ -1181,6 +1182,9 @@ int player_move(struct Player* p, float fsynctics, int id) {
 
 	// move player and perform simple physics (gravity, momentum, friction)
 	if(p->physics.jump) {
+		if(settings.player_stats && id == local_player_id) {
+			player_stats_jumps++;
+		}
 		sound_create(local ? SOUND_LOCAL : SOUND_WORLD, p->physics.wade ? &sound_jump_water : &sound_jump, p->pos.x,
 					 63.0F - p->pos.z, p->pos.y);
 		p->physics.jump = 0;

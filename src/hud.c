@@ -56,6 +56,26 @@
 struct hud* hud_active;
 struct window_instance* hud_window;
 
+int player_stats_blocks_placed = 0;
+int player_stats_kills = 0;
+int player_stats_headshots = 0;
+int player_stats_deaths = 0;
+float player_stats_distance = 0.0F;
+int player_stats_jumps = 0;
+
+static float player_stats_last_x = 0.0F;
+static float player_stats_last_y = 0.0F;
+static float player_stats_last_z = 0.0F;
+
+void player_stats_reset() {
+	player_stats_blocks_placed = 0;
+	player_stats_kills = 0;
+	player_stats_headshots = 0;
+	player_stats_deaths = 0;
+	player_stats_distance = 0.0F;
+	player_stats_jumps = 0;
+}
+
 #define LIGHTEN(c) (255.F * (settings.lighten_colors / 255.F) + c * (1.F - settings.lighten_colors / 255.F))
 
 static int is_inside_centered(double mx, double my, int x, int y, int w, int h) {
@@ -901,6 +921,27 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 	hud_active->render_localplayer = players[local_player_id].team != TEAM_SPECTATOR
 		&& (screen_current == SCREEN_NONE || camera_mode != CAMERAMODE_FPS);
 
+	if(settings.player_stats) {
+		if(!network_connected || !network_logged_in
+		   || players[local_player_id].team == TEAM_SPECTATOR) {
+			player_stats_reset();
+			player_stats_last_x = players[local_player_id].pos.x;
+			player_stats_last_y = players[local_player_id].pos.y;
+			player_stats_last_z = players[local_player_id].pos.z;
+		} else {
+			float dx = players[local_player_id].pos.x - player_stats_last_x;
+			float dy = players[local_player_id].pos.y - player_stats_last_y;
+			float dz = players[local_player_id].pos.z - player_stats_last_z;
+			float dist = sqrt(dx*dx + dy*dy + dz*dz);
+			if(dist < 10.0F) {
+				player_stats_distance += dist;
+			}
+			player_stats_last_x = players[local_player_id].pos.x;
+			player_stats_last_y = players[local_player_id].pos.y;
+			player_stats_last_z = players[local_player_id].pos.z;
+		}
+	}
+
 	if(cameracontroller_yclamp) {
 		glColor3f(1.0F, 1.0F, 1.0F);
 		hud_font_render(8.F, settings.window_height / 2 - 4.F, 16.0F, "Y-Clamp enabled", .5f);
@@ -1459,6 +1500,38 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 				// shadow
 				texture_draw_empty(settings.window_width - 8.F - 32.F, gmi_y, 32.F, 2.F);
 			}
+		}
+
+		if(settings.player_stats && network_connected && network_logged_in
+		   && players[local_player_id].team != TEAM_SPECTATOR) {
+			font_select(FONT_FIXEDSYS);
+			struct Team* team = players[local_player_id].team == TEAM_1
+				? &gamestate.team_1 : &gamestate.team_2;
+			float x = 8.F;
+			float y = settings.window_height / 2.F - 60.F;
+			float h = 16.F;
+			char line[64];
+
+			glColor3ub(team->red, team->green, team->blue);
+			sprintf(line, "Blocks Placed: %d", player_stats_blocks_placed);
+			hud_font_render(x, y, h, line, 1.F);
+
+			sprintf(line, "Kills: %d", player_stats_kills);
+			hud_font_render(x, y + h, h, line, 1.F);
+
+			sprintf(line, "Headshot Kills: %d", player_stats_headshots);
+			hud_font_render(x, y + h * 2, h, line, 1.F);
+
+			sprintf(line, "Deaths: %d", player_stats_deaths);
+			hud_font_render(x, y + h * 3, h, line, 1.F);
+
+			sprintf(line, "Distance Ran: %.0f blocks", player_stats_distance);
+			hud_font_render(x, y + h * 4, h, line, 1.F);
+
+			sprintf(line, "Jumps: %d", player_stats_jumps);
+			hud_font_render(x, y + h * 5, h, line, 1.F);
+
+			font_select(FONT_FIXEDSYS);
 		}
 
 		if(camera_mode != CAMERAMODE_SELECTION) {

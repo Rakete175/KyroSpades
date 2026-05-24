@@ -315,6 +315,7 @@ void config_save() {
 	config_seti("client", "show_live_player_count", settings.show_live_player_count);
 	config_seti("client", "ads_zoom_animation", settings.ads_zoom_animation);
 	config_seti("client", "auto_demo_recording", settings.auto_demo_recording);
+	config_seti("client", "player_stats", settings.player_stats);
 	config_seti("client", "rain", settings.rain);
 	config_seti("client", "snow", settings.snow);
 	config_seti("client", "snow_3d", settings.snow_3d);
@@ -402,6 +403,7 @@ static int config_read_key(void* user, const char* section, const char* name, co
 		IMPORT_SETTING(settings.show_live_player_count, show_live_player_count, atoi(value));
 		IMPORT_SETTING(settings.ads_zoom_animation, ads_zoom_animation, atoi(value));
 		IMPORT_SETTING(settings.auto_demo_recording, auto_demo_recording, atoi(value));
+		IMPORT_SETTING(settings.player_stats, player_stats, atoi(value));
 		IMPORT_SETTING(settings.rain, rain, atoi(value));
 		IMPORT_SETTING(settings.snow, snow, atoi(value));
 		IMPORT_SETTING(settings.snow_3d, snow_3d, atoi(value));
@@ -1143,6 +1145,17 @@ void config_reload() {
 				 .max = 1,
 				 .help = "Automatically record demo files when connecting to a server",
 				 .name = "Auto Demo Recording",
+				 .category = "KyroSpades Settings",
+			 });
+
+	list_add(&config_settings,
+			 &(struct config_setting) {
+				 .value = &settings_tmp.player_stats,
+				 .type = CONFIG_TYPE_INT,
+				 .min = 0,
+				 .max = 1,
+				 .help = "Displays player statistics",
+				 .name = "Player stats display",
 				 .category = "KyroSpades Settings",
 			 });
 

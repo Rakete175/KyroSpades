@@ -72,4 +72,13 @@ void hud_init();
 void hud_mousemode(int mode);
 int hud_accent_color();
 
+extern int player_stats_blocks_placed;
+extern int player_stats_kills;
+extern int player_stats_headshots;
+extern int player_stats_deaths;
+extern float player_stats_distance;
+extern int player_stats_jumps;
+
+void player_stats_reset(void);
+
 #endif
