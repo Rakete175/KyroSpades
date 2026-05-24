@@ -2689,7 +2689,11 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 				return;
 			}
 
+#ifdef USE_SDL
+			if(internal == SDLK_x && mods) {
+#else
 			if(internal == 88 /* X */ && mods) {
+#endif
 				if(chat_sel_active()) {
 					chat_sel_copy_to_clipboard();
 					chat_sel_delete();
@@ -2697,7 +2701,11 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 				return;
 			}
 
+#ifdef USE_SDL
+			if(internal == SDLK_a && mods) {
+#else
 			if(internal == 65 /* A */ && mods) {
+#endif
 				int len = (int)strlen(chat[0][0]);
 				chat_sel_anchor = 0;
 				chat_cursor = len;
@@ -3940,10 +3948,11 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
 	}
 }
 
-static void hud_settings_keyboard(int key, int action, int mods, int internal)  {
-	if(show_exit && key == WINDOW_KEY_ESCAPE) {
+static void hud_settings_keyboard(int key, int action, int mods, int internal) {
+	if(action == WINDOW_PRESS && show_exit && key == WINDOW_KEY_ESCAPE) {
 		hud_change(&hud_ingame);
-		show_exit = 1;
+		show_exit = 0;
+		window_mousemode(WINDOW_CURSOR_DISABLED);
 	}
 }
 
@@ -4112,9 +4121,10 @@ static void hud_controls_keyboard(int key, int action, int mods, int internal) {
 		config_save();
 	}
 
-	if(show_exit && key == WINDOW_KEY_ESCAPE) {
+	if(action == WINDOW_PRESS && show_exit && key == WINDOW_KEY_ESCAPE) {
 		hud_change(&hud_ingame);
-		show_exit = 1;
+		show_exit = 0;
+		window_mousemode(WINDOW_CURSOR_DISABLED);
 	}
 }
 

@@ -166,13 +166,19 @@ static mu_Rect content_body_rect = {0, 0, 0, 0};
    dropped and the counter clamps. */
 #define CHATLOG_SEARCH_MAX_MATCHES 4096
 
-/* GLFW raw key codes we detect via the `internal` parameter on the
-   keyboard callback - the configurable WINDOW_KEY_* mapping doesn't
+/* Raw key codes for letters we detect via the `internal` parameter on
+   the keyboard callback - the configurable WINDOW_KEY_* mapping doesn't
    cover the alphabetic letters we need (F for Ctrl+F, A for Ctrl+A),
    so we look at the raw code instead. Same trick as the chat input's
-   Home/End. */
-#define CHATLOG_GLFW_KEY_F  70
-#define CHATLOG_GLFW_KEY_A  65
+   Home/End.
+   SDL uses lowercase SDLK_* values; GLFW uses uppercase ASCII. */
+#ifdef USE_SDL
+#define CHATLOG_KEY_F  SDLK_f
+#define CHATLOG_KEY_A  SDLK_a
+#else
+#define CHATLOG_KEY_F  70
+#define CHATLOG_KEY_A  65
+#endif
 
 struct search_match {
 	int line;       /* index into `lines` */
@@ -1942,7 +1948,7 @@ static void hud_chatlog_keyboard(int key, int action, int mods, int internal) {
 	   because the letter F isn't reliably bound through the
 	   keybinding config - same trick the chat input uses for
 	   Home/End. */
-	if(internal == CHATLOG_GLFW_KEY_F && (mods || window_super_down())) {
+	if(internal == CHATLOG_KEY_F && (mods || window_super_down())) {
 		search_open();
 		return;
 	}
@@ -1993,7 +1999,7 @@ static void hud_chatlog_keyboard(int key, int action, int mods, int internal) {
 		copy_selection_to_clipboard();
 	}
 
-	if(internal == CHATLOG_GLFW_KEY_A && (mods || window_super_down())) {
+	if(internal == CHATLOG_KEY_A && (mods || window_super_down())) {
 		select_all_lines();
 	}
 }

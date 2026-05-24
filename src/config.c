@@ -19,7 +19,7 @@
 
 #include <stdlib.h>
 #include <float.h>
-#include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 #include <limits.h>
 #include <math.h>
@@ -38,6 +38,192 @@ struct list config_keys;
 struct list config_settings;
 
 struct list config_file;
+
+#ifdef USE_SDL
+#define CONFIG_BACKEND "sdl"
+#else
+#define CONFIG_BACKEND "glfw"
+#endif
+
+/* Backend that wrote the config file currently being parsed.  Defaults to
+   "glfw" because pre-backend-tag config files were all written by GLFW
+   builds. */
+static char config_file_backend[8] = "glfw";
+
+/* Tracks, by index into config_keys, whether a control binding was read from a
+   symbolic key name rather than a raw integer.  Name-resolved bindings already
+   hold the current backend's key code, so the legacy integer migration pass
+   below must leave them untouched.  Sized well above the number of registered
+   keys; entries past the cap simply fall through to the (safe) integer path. */
+#define CONFIG_KEYS_MAX 256
+static unsigned char config_key_named[CONFIG_KEYS_MAX];
+
+#ifdef USE_SDL
+/* Map a raw GLFW key code (as found in a legacy config.ini written by a GLFW
+   build) to the equivalent SDL keysym.  Only used when migrating a GLFW config
+   into an SDL build.  Covers every key bound by default in config_reload();
+   unknown codes are returned unchanged and reported by the caller. */
+static int config_glfw_to_sdl(int code) {
+	switch(code) {
+		case 32:  return SDLK_SPACE;
+		case 44:  return SDLK_COMMA;
+		case 45:  return SDLK_MINUS;
+		case 46:  return SDLK_PERIOD;
+		case 47:  return SDLK_SLASH;
+		case 49:  return SDLK_1;
+		case 50:  return SDLK_2;
+		case 51:  return SDLK_3;
+		case 52:  return SDLK_4;
+		case 61:  return SDLK_EQUALS;
+		case 65:  return SDLK_a;
+		case 67:  return SDLK_c;
+		case 68:  return SDLK_d;
+		case 69:  return SDLK_e;
+		case 77:  return SDLK_m;
+		case 78:  return SDLK_n;
+		case 80:  return SDLK_p;
+		case 81:  return SDLK_q;
+		case 82:  return SDLK_r;
+		case 83:  return SDLK_s;
+		case 84:  return SDLK_t;
+		case 86:  return SDLK_v;
+		case 87:  return SDLK_w;
+		case 89:  return SDLK_y;
+		case 90:  return SDLK_z;
+		case 256: return SDLK_ESCAPE;
+		case 257: return SDLK_RETURN;
+		case 258: return SDLK_TAB;
+		case 259: return SDLK_BACKSPACE;
+		case 262: return SDLK_RIGHT;
+		case 263: return SDLK_LEFT;
+		case 264: return SDLK_DOWN;
+		case 265: return SDLK_UP;
+		case 290: return SDLK_F1;
+		case 291: return SDLK_F2;
+		case 292: return SDLK_F3;
+		case 293: return SDLK_F4;
+		case 294: return SDLK_F5;
+		case 295: return SDLK_F6;
+		case 298: return SDLK_F9;
+		case 300: return SDLK_F11;
+		case 301: return SDLK_F12;
+		case 333: return SDLK_KP_MINUS;
+		case 334: return SDLK_KP_PLUS;
+		case 340: return SDLK_LSHIFT;
+		case 341: return SDLK_LCTRL;
+		default:  return code;
+	}
+}
+#endif
+
+/* Human-readable key names written to / read from config.ini, replacing the
+   old raw integer key codes.  This is the single source of truth for both
+   backends: each row pairs a token with its GLFW and SDL symbol suffix, and the
+   macro below selects the column for whichever backend is being compiled (only
+   that backend's headers are present, so only its column is ever referenced).
+   Because the tokens match across backends, a config written on one backend is
+   also understood by the other — moving config.ini between a GLFW machine and
+   an SDL one "just works".  Format:  KEY(token, GLFW suffix, SDL suffix). */
+#define CONFIG_KEY_NAMES(KEY)                                  \
+	KEY("a", A, a) KEY("b", B, b) KEY("c", C, c) KEY("d", D, d) \
+	KEY("e", E, e) KEY("f", F, f) KEY("g", G, g) KEY("h", H, h) \
+	KEY("i", I, i) KEY("j", J, j) KEY("k", K, k) KEY("l", L, l) \
+	KEY("m", M, m) KEY("n", N, n) KEY("o", O, o) KEY("p", P, p) \
+	KEY("q", Q, q) KEY("r", R, r) KEY("s", S, s) KEY("t", T, t) \
+	KEY("u", U, u) KEY("v", V, v) KEY("w", W, w) KEY("x", X, x) \
+	KEY("y", Y, y) KEY("z", Z, z)                               \
+	KEY("0", 0, 0) KEY("1", 1, 1) KEY("2", 2, 2) KEY("3", 3, 3) \
+	KEY("4", 4, 4) KEY("5", 5, 5) KEY("6", 6, 6) KEY("7", 7, 7) \
+	KEY("8", 8, 8) KEY("9", 9, 9)                               \
+	KEY("f1", F1, F1)   KEY("f2", F2, F2)   KEY("f3", F3, F3)   \
+	KEY("f4", F4, F4)   KEY("f5", F5, F5)   KEY("f6", F6, F6)   \
+	KEY("f7", F7, F7)   KEY("f8", F8, F8)   KEY("f9", F9, F9)   \
+	KEY("f10", F10, F10) KEY("f11", F11, F11) KEY("f12", F12, F12) \
+	KEY("space", SPACE, SPACE)                                 \
+	KEY("escape", ESCAPE, ESCAPE)                              \
+	KEY("enter", ENTER, RETURN)                                \
+	KEY("tab", TAB, TAB)                                       \
+	KEY("backspace", BACKSPACE, BACKSPACE)                     \
+	KEY("delete", DELETE, DELETE)                              \
+	KEY("insert", INSERT, INSERT)                              \
+	KEY("home", HOME, HOME) KEY("end", END, END)               \
+	KEY("page_up", PAGE_UP, PAGEUP)                            \
+	KEY("page_down", PAGE_DOWN, PAGEDOWN)                      \
+	KEY("left", LEFT, LEFT)   KEY("right", RIGHT, RIGHT)       \
+	KEY("up", UP, UP)         KEY("down", DOWN, DOWN)          \
+	KEY("left_shift", LEFT_SHIFT, LSHIFT)                      \
+	KEY("right_shift", RIGHT_SHIFT, RSHIFT)                    \
+	KEY("left_control", LEFT_CONTROL, LCTRL)                   \
+	KEY("right_control", RIGHT_CONTROL, RCTRL)                 \
+	KEY("left_alt", LEFT_ALT, LALT)                            \
+	KEY("right_alt", RIGHT_ALT, RALT)                          \
+	KEY("left_super", LEFT_SUPER, LGUI)                        \
+	KEY("right_super", RIGHT_SUPER, RGUI)                      \
+	KEY("caps_lock", CAPS_LOCK, CAPSLOCK)                      \
+	KEY("comma", COMMA, COMMA)                                 \
+	KEY("period", PERIOD, PERIOD)                              \
+	KEY("slash", SLASH, SLASH)                                 \
+	KEY("minus", MINUS, MINUS)                                 \
+	KEY("equals", EQUAL, EQUALS)                               \
+	KEY("semicolon", SEMICOLON, SEMICOLON)                     \
+	KEY("apostrophe", APOSTROPHE, QUOTE)                       \
+	KEY("grave", GRAVE_ACCENT, BACKQUOTE)                      \
+	KEY("left_bracket", LEFT_BRACKET, LEFTBRACKET)             \
+	KEY("right_bracket", RIGHT_BRACKET, RIGHTBRACKET)          \
+	KEY("backslash", BACKSLASH, BACKSLASH)                     \
+	KEY("kp_0", KP_0, KP_0) KEY("kp_1", KP_1, KP_1)            \
+	KEY("kp_2", KP_2, KP_2) KEY("kp_3", KP_3, KP_3)            \
+	KEY("kp_4", KP_4, KP_4) KEY("kp_5", KP_5, KP_5)            \
+	KEY("kp_6", KP_6, KP_6) KEY("kp_7", KP_7, KP_7)            \
+	KEY("kp_8", KP_8, KP_8) KEY("kp_9", KP_9, KP_9)            \
+	KEY("kp_add", KP_ADD, KP_PLUS)                             \
+	KEY("kp_subtract", KP_SUBTRACT, KP_MINUS)                  \
+	KEY("kp_multiply", KP_MULTIPLY, KP_MULTIPLY)               \
+	KEY("kp_divide", KP_DIVIDE, KP_DIVIDE)                     \
+	KEY("kp_enter", KP_ENTER, KP_ENTER)                        \
+	KEY("kp_decimal", KP_DECIMAL, KP_PERIOD)
+
+#ifdef USE_SDL
+#define CONFIG_KEY_ROW(tok, g, s) { tok, SDLK_##s },
+#else
+#define CONFIG_KEY_ROW(tok, g, s) { tok, GLFW_KEY_##g },
+#endif
+
+static const struct {
+	const char* name;
+	int code;
+} config_key_table[] = {
+	CONFIG_KEY_NAMES(CONFIG_KEY_ROW)
+};
+
+#undef CONFIG_KEY_ROW
+
+#define CONFIG_KEY_TABLE_LEN ((int)(sizeof(config_key_table) / sizeof(config_key_table[0])))
+
+/* Symbolic key name (e.g. "w", "left_shift") -> current backend key code, or
+   -1 if the token is not a known name.  Case-insensitive. */
+static int config_keyname_to_code(const char* name) {
+	for(int i = 0; i < CONFIG_KEY_TABLE_LEN; i++) {
+		const char* a = config_key_table[i].name;
+		const char* b = name;
+		while(*a && *b && tolower((unsigned char)*a) == tolower((unsigned char)*b)) {
+			a++;
+			b++;
+		}
+		if(*a == 0 && *b == 0)
+			return config_key_table[i].code;
+	}
+	return -1;
+}
+
+/* Current backend key code -> canonical symbolic name, or NULL if the code has
+   no name (the binding is then saved as a raw integer to avoid losing it). */
+static const char* config_keyname_from_code(int code) {
+	for(int i = 0; i < CONFIG_KEY_TABLE_LEN; i++)
+		if(config_key_table[i].code == code)
+			return config_key_table[i].name;
+	return NULL;
+}
 
 #define IMPORT_SETTING(key, ini, _value)        \
     if(!strcmp(name, #ini)) {                   \
@@ -136,10 +322,17 @@ void config_save() {
 	config_setf("client", "shotgun_ads_fov", settings.shotgun_ads_fov);
 	config_setf("client", "smg_ads_fov", settings.smg_ads_fov);
 
+	config_sets("meta", "backend", CONFIG_BACKEND);
+
 	for(int k = 0; k < list_size(&config_keys); k++) {
 		struct config_key_pair* e = list_get(&config_keys, k);
-		if(strlen(e->name) > 0)
-			config_seti("controls", e->name, e->def);
+		if(strlen(e->name) > 0) {
+			const char* kn = config_keyname_from_code(e->def);
+			if(kn)
+				config_sets("controls", e->name, kn);
+			else
+				config_seti("controls", e->name, e->def); /* exotic key: keep raw code */
+		}
 	}
 
 	void* f = file_open("config.ini", "w");
@@ -216,12 +409,30 @@ static int config_read_key(void* user, const char* section, const char* name, co
 		IMPORT_SETTING(settings.shotgun_ads_fov, shotgun_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
 		IMPORT_SETTING(settings.smg_ads_fov, smg_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
 	}
+	if(!strcmp(section, "meta")) {
+		if(!strcmp(name, "backend")) {
+			strncpy(config_file_backend, value, sizeof(config_file_backend) - 1);
+			config_file_backend[sizeof(config_file_backend) - 1] = 0;
+		}
+	}
 	if(!strcmp(section, "controls")) {
 		for(int k = 0; k < list_size(&config_keys); k++) {
 			struct config_key_pair* key = list_get(&config_keys, k);
 			if(!strcmp(name, key->name)) {
-				log_debug("found override for %s, from %i to %i", key->name, key->def, atoi(value));
-				key->def = strtol(value, NULL, 0);
+				int named = config_keyname_to_code(value);
+				if(named >= 0) {
+					/* Symbolic name: already expressed in this backend's key
+					   codes, so it must not be touched by the migration pass. */
+					key->def = named;
+					if(k < CONFIG_KEYS_MAX)
+						config_key_named[k] = 1;
+				} else {
+					/* Legacy raw integer code; migrated post-parse if the file
+					   was written by a different backend. */
+					key->def = strtol(value, NULL, 0);
+				}
+				log_debug("found override for %s -> %i (%s)", key->name, key->def,
+						  named >= 0 ? "name" : "legacy code");
 				break;
 			}
 		}
@@ -464,11 +675,34 @@ void config_reload() {
 
 	list_sort(&config_keys, config_key_cmp);
 
+	strcpy(config_file_backend, "glfw");
+	memset(config_key_named, 0, sizeof(config_key_named));
+
 	char* s = file_load("config.ini");
 	if(s) {
 		ini_parse_string(s, config_read_key, NULL);
 		free(s);
 	}
+
+#ifdef USE_SDL
+	/* Single post-parse migration: now that the whole file has been read,
+	   config_file_backend is final, so [meta] and [controls] order in the file
+	   no longer matters.  Convert legacy raw GLFW key codes to SDL keysyms once.
+	   Bindings that were read as symbolic names are already correct and skipped. */
+	if(strcmp(config_file_backend, CONFIG_BACKEND) != 0) {
+		for(int k = 0; k < list_size(&config_keys); k++) {
+			if(k < CONFIG_KEYS_MAX && config_key_named[k])
+				continue;
+			struct config_key_pair* key = list_get(&config_keys, k);
+			int converted = config_glfw_to_sdl(key->def);
+			if(converted == key->def && key->def != key->original)
+				log_warn("config: no %s->%s mapping for key code %i (%s), kept as-is",
+						 config_file_backend, CONFIG_BACKEND, key->def,
+						 key->name[0] ? key->name : "<unnamed>");
+			key->def = converted;
+		}
+	}
+#endif
 
 	if(!list_created(&config_settings))
 		list_create(&config_settings, sizeof(struct config_setting));
