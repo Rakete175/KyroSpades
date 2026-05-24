@@ -3,9 +3,15 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
-    permissions:
-      contents: write
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          - os: ubuntu-latest
+            platform: linux
 
     steps:
       - name: Checkout your fork
@@ -18,7 +24,9 @@ jobs:
           git merge upstream/main --no-edit || true
         shell: bash
 
-      - name: Install MSYS2
+      # --- WINDOWS ONLY BUILD STEPS ---
+      - name: Install MSYS2 (Windows)
+        if: matrix.platform == 'windows'
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -34,41 +42,94 @@ jobs:
             mingw-w64-ucrt-x86_64-python
             zip
             make
-      - name: Apply Windows fixes
+
+      - name: Apply Windows fixes (Windows)
+        if: matrix.platform == 'windows'
         shell: msys2 {0}
         run: |
           sed -i '1s/^/#include <stdint.h>\n/' src/network.h || true
           sed -i '1s/^/#include <sys\/stat.h>\n/' src/texture.c || true
           sed -i 's/if(entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {/struct stat st; char _stat_path[512]; snprintf(_stat_path, sizeof(_stat_path), "%s\/%s", bg_folder, entry->d_name); stat(_stat_path, \&st); if(S_ISREG(st.st_mode)) {/g' src/texture.c || true
           sed -i 's/mkdir(dir_path, 0755)/mkdir(dir_path)/' src/demo.c || true
-      - name: Build
+
+      - name: Build (Windows)
+        if: matrix.platform == 'windows'
         shell: msys2 {0}
         run: |
           mkdir -p build
           cd build
           cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ..
           make -j$(nproc)
-      - name: Bundle DLLs
+
+      - name: Bundle DLLs (Windows)
+        if: matrix.platform == 'windows'
         shell: msys2 {0}
         run: |
           cd build/KyroSpades
           ldd client.exe | grep ucrt64 | awk '{print $3}' | xargs -I{} cp {} .
-      - name: Zip release
+
+      - name: Zip release (Windows)
+        if: matrix.platform == 'windows'
         shell: msys2 {0}
         run: |
           cd build
           zip -r KyroSpades-win64.zip KyroSpades/
+
+      # --- LINUX ONLY BUILD STEPS ---
+      - name: Install dependencies (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libglfw3-dev libglew-dev libopenal-dev libenet-dev libdeflate-dev zip
+
+      - name: Build (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          mkdir -p build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release ..
+          make -j$(nproc)
+
+      - name: Zip release (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          cd build
+          zip -r "KyroSpades Linux.zip" KyroSpades/
+
+      # --- UPLOAD ARTIFACTS FOR THE RELEASE JOB ---
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-build
+          path: |
+            build/KyroSpades-win64.zip
+            build/KyroSpades Linux.zip
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: release-artifacts
+
       - name: Get date for release tag
         id: date
         run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-        shell: bash
 
       - name: Upload as GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ steps.date.outputs.date }}
-          name: KyroSpades ${{ steps.date.outputs.date }}
-          files: build/KyroSpades-win64.zip
-          body: Latest verion of the game compiled for Windows and Linux.
+          name: Latest Windows and Linux Build
+          files: |
+            release-artifacts/KyroSpades-win64.zip
+            release-artifacts/KyroSpades Linux.zip
+          body: Latest version of the game compiled for Windows and Linux.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
