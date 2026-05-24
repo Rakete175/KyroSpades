@@ -178,6 +178,21 @@ static void window_impl_keys(GLFWwindow* window, int key, int scancode, int acti
 }
 
 void window_keyname(int keycode, char* output, size_t length) {
+#ifdef OS_WINDOWS
+	if(glfwGetKeyScancode(keycode) > 0) {
+		GetKeyNameTextA(glfwGetKeyScancode(keycode) << 16, output, length);
+		if(output[0] && strcmp(output, "?")) return;
+	}
+#else
+	const char* name = glfwGetKeyName(keycode, 0);
+	if(name && *name) {
+		strncpy(output, name, length);
+		output[length - 1] = 0;
+		return;
+	}
+#endif
+	/* Backend couldn't name it — fall back to our internal key labels for
+	   non-printable keys (arrows, demo controls, etc.). */
 	{
 		int results[8];
 		int count = config_key_translate(keycode, 0, results);
@@ -186,19 +201,7 @@ void window_keyname(int keycode, char* output, size_t length) {
 			if(fb) { strncpy(output, fb, length); output[length - 1] = 0; return; }
 		}
 	}
-#ifdef OS_WINDOWS
-	GetKeyNameTextA(glfwGetKeyScancode(keycode) << 16, output, length);
-#else
-	const char* name = glfwGetKeyName(keycode, 0);
-
-	if(name) {
-		strncpy(output, name, length);
-		output[length - 1] = 0;
-	} else {
-		if(length >= 2)
-			strcpy(output, "?");
-	}
-#endif
+	if(length >= 2) strcpy(output, "?");
 }
 
 float window_time() {
@@ -436,6 +439,16 @@ void window_fromsettings() {
 }
 
 void window_keyname(int keycode, char* output, size_t length) {
+	/* Ask SDL first — it knows the human name for every printable key, plus
+	   named non-printables ("Left", "Right", "Escape", etc.).  Only fall back
+	   to our internal labels when SDL genuinely can't help. */
+	const char* nm = SDL_GetKeyName(keycode);
+	if(nm && *nm && strcmp(nm, "Unknown Key")) {
+		strncpy(output, nm, length);
+		output[length - 1] = 0;
+		return;
+	}
+	/* Last resort: our label table for keys SDL can't name. */
 	{
 		int results[8];
 		int count = config_key_translate(keycode, 0, results);
@@ -444,10 +457,7 @@ void window_keyname(int keycode, char* output, size_t length) {
 			if(fb) { strncpy(output, fb, length); output[length - 1] = 0; return; }
 		}
 	}
-	const char* nm = SDL_GetKeyName(keycode);
-	if(!nm || !*nm) nm = "?";
-	strncpy(output, nm, length);
-	output[length - 1] = 0;
+	if(length >= 2) strcpy(output, "?");
 }
 
 float window_time() {
