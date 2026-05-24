@@ -2689,7 +2689,11 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 				return;
 			}
 
+#ifdef USE_SDL
+			if(internal == SDLK_x && mods) {
+#else
 			if(internal == 88 /* X */ && mods) {
+#endif
 				if(chat_sel_active()) {
 					chat_sel_copy_to_clipboard();
 					chat_sel_delete();
@@ -2697,7 +2701,11 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 				return;
 			}
 
+#ifdef USE_SDL
+			if(internal == SDLK_a && mods) {
+#else
 			if(internal == 65 /* A */ && mods) {
+#endif
 				int len = (int)strlen(chat[0][0]);
 				chat_sel_anchor = 0;
 				chat_cursor = len;

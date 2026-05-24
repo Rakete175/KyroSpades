@@ -580,11 +580,11 @@ void window_update() {
 			case SDL_QUIT: quit = 1; break;
 			case SDL_KEYDOWN:
 				window_dispatch_key(event.key.keysym.sym, WINDOW_PRESS,
-									 event.key.keysym.mod & (KMOD_CTRL | KMOD_SHIFT | KMOD_GUI));
+									 event.key.keysym.mod & (KMOD_CTRL | KMOD_GUI));
 				break;
 			case SDL_KEYUP:
 				window_dispatch_key(event.key.keysym.sym, WINDOW_RELEASE,
-									 event.key.keysym.mod & (KMOD_CTRL | KMOD_SHIFT | KMOD_GUI));
+									 event.key.keysym.mod & (KMOD_CTRL | KMOD_GUI));
 				break;
 			case SDL_MOUSEBUTTONDOWN: {
 				int a = 0;
