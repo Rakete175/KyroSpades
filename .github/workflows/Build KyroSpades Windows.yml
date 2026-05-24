@@ -1,8 +1,5 @@
-
 on:
-  schedule:
-    - cron: '0 6 * * *'  # Daily at 6am UTC
-  workflow_dispatch:      # Also allows manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   build:
