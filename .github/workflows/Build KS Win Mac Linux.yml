@@ -111,7 +111,7 @@ jobs:
         run: |
           mkdir -p build
           cd build
-          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix openal-soft)" ..
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix openal-soft)" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ..
           make -j$(sysctl -n hw.logicalcpu)
 
       # --- UPLOAD ARTIFACTS PER PLATFORM ---
@@ -195,7 +195,7 @@ jobs:
       - name: Upload as GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ steps.date.outputs.date }}
+          tag_name: Release
           name: Latest Windows, Linux and macOS Build
           files: |
             release-artifacts/KyroSpades-win64.zip
