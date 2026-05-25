@@ -1,0 +1,206 @@
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-13
+            platform: macos-intel
+          - os: macos-latest
+            platform: macos-arm
+
+    steps:
+      - name: Checkout your fork
+        uses: actions/checkout@v4
+
+      - name: Sync upstream KyroSpades
+        run: |
+          git remote add upstream https://github.com/Kyrope01/KyroSpades.git || true
+          git fetch upstream
+          git merge upstream/main --no-edit || true
+        shell: bash
+
+      # --- WINDOWS ONLY BUILD STEPS ---
+      - name: Install MSYS2 (Windows)
+        if: matrix.platform == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-glfw
+            mingw-w64-ucrt-x86_64-glew
+            mingw-w64-ucrt-x86_64-openal
+            mingw-w64-ucrt-x86_64-enet
+            mingw-w64-ucrt-x86_64-libdeflate
+            mingw-w64-ucrt-x86_64-python
+            zip
+            make
+
+      - name: Apply Windows fixes (Windows)
+        if: matrix.platform == 'windows'
+        shell: msys2 {0}
+        run: |
+          sed -i '1s/^/#include <stdint.h>\n/' src/network.h || true
+          sed -i '1s/^/#include <sys\/stat.h>\n/' src/texture.c || true
+          sed -i 's/if(entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {/struct stat st; char _stat_path[512]; snprintf(_stat_path, sizeof(_stat_path), "%s\/%s", bg_folder, entry->d_name); stat(_stat_path, \&st); if(S_ISREG(st.st_mode)) {/g' src/texture.c || true
+          sed -i 's/mkdir(dir_path, 0755)/mkdir(dir_path)/' src/demo.c || true
+
+      - name: Build (Windows)
+        if: matrix.platform == 'windows'
+        shell: msys2 {0}
+        run: |
+          mkdir -p build
+          cd build
+          cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ..
+          make -j$(nproc)
+
+      - name: Bundle DLLs (Windows)
+        if: matrix.platform == 'windows'
+        shell: msys2 {0}
+        run: |
+          cd build/KyroSpades
+          ldd client.exe | grep ucrt64 | awk '{print $3}' | xargs -I{} cp {} .
+
+      - name: Zip release (Windows)
+        if: matrix.platform == 'windows'
+        shell: msys2 {0}
+        run: |
+          cd build
+          zip -r KyroSpades-win64.zip KyroSpades/
+
+      # --- LINUX ONLY BUILD STEPS ---
+      - name: Install dependencies (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libglfw3-dev libglew-dev libopenal-dev libenet-dev libdeflate-dev zip
+
+      - name: Build (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          mkdir -p build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release ..
+          make -j$(nproc)
+
+      - name: Zip release (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          cd build
+          zip -r "KyroSpades Linux.zip" KyroSpades/
+
+      # --- MACOS BUILD STEPS (both Intel and ARM) ---
+      - name: Install dependencies (macOS)
+        if: matrix.platform == 'macos-intel' || matrix.platform == 'macos-arm'
+        run: |
+          brew install cmake sdl2 glew openal-soft enet libdeflate
+
+      - name: Build (macOS)
+        if: matrix.platform == 'macos-intel' || matrix.platform == 'macos-arm'
+        run: |
+          mkdir -p build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix openal-soft)" ..
+          make -j$(sysctl -n hw.logicalcpu)
+
+      # --- UPLOAD ARTIFACTS PER PLATFORM ---
+      - name: Upload zip artifact (Windows)
+        if: matrix.platform == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: build/KyroSpades-win64.zip
+
+      - name: Upload zip artifact (Linux)
+        if: matrix.platform == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: build/KyroSpades Linux.zip
+
+      - name: Upload raw build directory (macOS Intel)
+        if: matrix.platform == 'macos-intel'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-intel-raw
+          path: build/KyroSpades/
+
+      - name: Upload raw build directory (macOS ARM)
+        if: matrix.platform == 'macos-arm'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm-raw
+          path: build/KyroSpades/
+
+  package-macos:
+    name: Package Universal macOS Build
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-intel-raw
+          path: macos-intel
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-arm-raw
+          path: macos-arm
+
+      - name: Create universal binary and zip
+        run: |
+          mkdir -p KyroSpades
+          cp -r macos-arm/* KyroSpades/
+          lipo -create \
+            macos-intel/client \
+            macos-arm/client \
+            -output KyroSpades/client
+          chmod +x KyroSpades/client
+          zip -r "KyroSpades MacOS.zip" KyroSpades/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: KyroSpades MacOS.zip
+
+  release:
+    name: Create GitHub Release
+    needs: [build, package-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-build"
+          merge-multiple: true
+          path: release-artifacts
+
+      - name: Get date for release tag
+        id: date
+        run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Upload as GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ steps.date.outputs.date }}
+          name: Latest Windows, Linux and macOS Build
+          files: |
+            release-artifacts/KyroSpades-win64.zip
+            release-artifacts/KyroSpades Linux.zip
+            release-artifacts/KyroSpades MacOS.zip
+          body: Latest version of the game compiled for Windows, Linux and macOS.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
