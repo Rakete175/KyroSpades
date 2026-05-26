@@ -5,13 +5,17 @@ jobs:
   build:
     name: Build for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
             platform: windows
           - os: ubuntu-latest
             platform: linux
+          - os: macos-15-intel
+            platform: macos
 
     steps:
       - name: Checkout your fork
@@ -23,6 +27,13 @@ jobs:
           git fetch upstream
           git merge upstream/main --no-edit || true
         shell: bash
+
+      - name: Cache CMake dependencies
+        if: matrix.platform != 'windows'
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: ${{ runner.os }}-deps-${{ hashFiles('src/CMakeLists.txt') }}
 
       # --- WINDOWS ONLY BUILD STEPS ---
       - name: Install MSYS2 (Windows)
@@ -96,14 +107,99 @@ jobs:
           cd build
           zip -r "KyroSpades Linux.zip" KyroSpades/
 
-      # --- UPLOAD ARTIFACTS FOR THE RELEASE JOB ---
-      - name: Upload zip artifact
+      # --- MACOS ONLY BUILD STEPS (x86_64, targets macOS 11.0+) ---
+      - name: Cache source-built macOS deps
+        if: matrix.platform == 'macos'
+        uses: actions/cache@v4
+        with:
+          path: deps-prefix
+          key: macos-x86_64-target11-glew2.2.0-enet1.3.18-libdeflate1.19
+
+      - name: Install build tools (macOS)
+        if: matrix.platform == 'macos'
+        run: brew install cmake pkg-config
+
+      - name: Build dependencies from source (macOS)
+        if: matrix.platform == 'macos'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+        run: |
+          set -euo pipefail
+          DEPS="$GITHUB_WORKSPACE/deps-prefix"
+          mkdir -p "$DEPS/lib" "$DEPS/include"
+          COMMON="-DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+                  -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+                  -DCMAKE_INSTALL_PREFIX=$DEPS \
+                  -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+
+          # GLEW (static) -- consumed via builtin FindGLEW -> GLEW::GLEW
+          if [ ! -f "$DEPS/lib/libGLEW.a" ]; then
+            curl -L -o glew.tgz https://github.com/nigels-com/glew/releases/download/glew-2.2.0/glew-2.2.0.tgz
+            tar xzf glew.tgz
+            cmake -S glew-2.2.0/build/cmake -B glew-build $COMMON -DBUILD_SHARED_LIBS=OFF -DBUILD_UTILS=OFF
+            cmake --build glew-build
+            cmake --install glew-build
+          fi
+
+          # enet (static) -- consumed via Findenet -> enet::enet
+          if [ ! -f "$DEPS/lib/libenet.a" ]; then
+            curl -L -o enet.tar.gz https://github.com/lsalzman/enet/archive/refs/tags/v1.3.18.tar.gz
+            tar xzf enet.tar.gz
+            cmake -S enet-1.3.18 -B enet-build $COMMON
+            cmake --build enet-build
+            cp enet-build/libenet.a "$DEPS/lib/"
+            cp -r enet-1.3.18/include/enet "$DEPS/include/"
+          fi
+
+          # libdeflate (static) -- consumed via Finddeflate -> deflate::deflate
+          if [ ! -f "$DEPS/lib/libdeflate.a" ]; then
+            curl -L -o libdeflate.tar.gz https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.19.tar.gz
+            tar xzf libdeflate.tar.gz
+            cmake -S libdeflate-1.19 -B libdeflate-build $COMMON \
+                  -DLIBDEFLATE_BUILD_SHARED_LIB=OFF \
+                  -DLIBDEFLATE_BUILD_STATIC_LIB=ON \
+                  -DLIBDEFLATE_BUILD_GZIP=OFF
+            cmake --build libdeflate-build
+            cmake --install libdeflate-build
+          fi
+
+      - name: Build (macOS)
+        if: matrix.platform == 'macos'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+                -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+                -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/deps-prefix" \
+                -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+                ..
+          make -j$(sysctl -n hw.logicalcpu)
+
+      - name: Verify macOS binary arch + min OS (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          BIN=build/KyroSpades/client
+          file "$BIN"
+          lipo -archs "$BIN" || true
+          otool -l "$BIN" | grep -A4 -E 'LC_VERSION_MIN_MACOSX|LC_BUILD_VERSION' || true
+
+      - name: Zip release (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          cd build
+          zip -r "KyroSpades MacOS.zip" KyroSpades/
+
+      # --- UPLOAD ARTIFACTS ---
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-build
-          path: |
-            build/KyroSpades-win64.zip
-            build/KyroSpades Linux.zip
+          path: build/*.zip
 
   release:
     name: Create GitHub Release
@@ -115,6 +211,7 @@ jobs:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: "*-build"
           merge-multiple: true
           path: release-artifacts
 
@@ -126,10 +223,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ steps.date.outputs.date }}
-          name: Latest Windows and Linux Build
+          name: Latest Windows, Linux and macOS Build
           files: |
             release-artifacts/KyroSpades-win64.zip
             release-artifacts/KyroSpades Linux.zip
-          body: Latest version of the game compiled for Windows and Linux.
+            release-artifacts/KyroSpades MacOS.zip
+          body: Latest version of the game compiled for Windows, Linux and macOS.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
