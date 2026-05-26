@@ -52,6 +52,8 @@
 #include "sound.h"
 #include "gmi.h"
 #include "chatlog.h"
+#include "particle.h"
+#include "model.h"
 
 struct hud* hud_active;
 struct window_instance* hud_window;
@@ -66,6 +68,9 @@ int player_stats_jumps = 0;
 static float player_stats_last_x = 0.0F;
 static float player_stats_last_y = 0.0F;
 static float player_stats_last_z = 0.0F;
+static float particle_stats_last_time = 0.0F;
+static int particle_stats_last_total = 0;
+static float particle_stats_created_per_second = 0.0F;
 
 void player_stats_reset() {
 	player_stats_blocks_placed = 0;
@@ -84,6 +89,20 @@ static int is_inside_centered(double mx, double my, int x, int y, int w, int h) 
 
 static int is_inside(double mx, double my, int x, int y, int w, int h) {
 	return mx >= x && mx < x + w && my >= y && my < y + h;
+}
+
+static void format_comma(char* buffer, int value) {
+	char tmp[32];
+	sprintf(tmp, "%d", value);
+	int len = strlen(tmp);
+	int j = 0;
+	for(int i = 0; i < len; i++) {
+		if(i > 0 && (len - i) % 3 == 0) {
+			buffer[j++] = ',';
+		}
+		buffer[j++] = tmp[i];
+	}
+	buffer[j] = '\0';
 }
 
 void hud_init() {
@@ -940,6 +959,13 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 			player_stats_last_y = players[local_player_id].pos.y;
 			player_stats_last_z = players[local_player_id].pos.z;
 		}
+		float now = window_time();
+		float dt = now - particle_stats_last_time;
+		if(dt >= 0.5F) {
+			particle_stats_created_per_second = (particle_stats_total_created - particle_stats_last_total) / dt;
+			particle_stats_last_total = particle_stats_total_created;
+			particle_stats_last_time = now;
+		}
 	}
 
 	if(cameracontroller_yclamp) {
@@ -1511,25 +1537,67 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 			float y = settings.window_height / 2.F - 60.F;
 			float h = 16.F;
 			char line[64];
+			char num_buf[32];
 
 			glColor3ub(team->red, team->green, team->blue);
-			sprintf(line, "Blocks Placed: %d", player_stats_blocks_placed);
+			format_comma(num_buf, player_stats_blocks_placed);
+			sprintf(line, "Blocks Placed: %s", num_buf);
 			hud_font_render(x, y, h, line, 1.F);
 
-			sprintf(line, "Kills: %d", player_stats_kills);
+			format_comma(num_buf, player_stats_kills);
+			sprintf(line, "Kills: %s", num_buf);
 			hud_font_render(x, y + h, h, line, 1.F);
 
-			sprintf(line, "Headshot Kills: %d", player_stats_headshots);
+			format_comma(num_buf, player_stats_headshots);
+			sprintf(line, "Headshot Kills: %s", num_buf);
 			hud_font_render(x, y + h * 2, h, line, 1.F);
 
-			sprintf(line, "Deaths: %d", player_stats_deaths);
+			format_comma(num_buf, player_stats_deaths);
+			sprintf(line, "Deaths: %s", num_buf);
 			hud_font_render(x, y + h * 3, h, line, 1.F);
 
-			sprintf(line, "Distance Ran: %.0f blocks", player_stats_distance);
+			format_comma(num_buf, (int)player_stats_distance);
+			sprintf(line, "Distance Traveled: %s blocks", num_buf);
 			hud_font_render(x, y + h * 4, h, line, 1.F);
 
-			sprintf(line, "Jumps: %d", player_stats_jumps);
+			format_comma(num_buf, player_stats_jumps);
+			sprintf(line, "Jumps: %s", num_buf);
 			hud_font_render(x, y + h * 5, h, line, 1.F);
+
+			font_select(FONT_FIXEDSYS);
+		}
+
+		if(settings.player_technical_stats && network_connected && network_logged_in
+		   && players[local_player_id].team != TEAM_SPECTATOR) {
+			font_select(FONT_FIXEDSYS);
+			struct Team* team = players[local_player_id].team == TEAM_1
+				? &gamestate.team_1 : &gamestate.team_2;
+			float x = settings.window_width - 8.F - font_length(16.F, "New Parts/s: 9,999,999");
+			float y = settings.window_height / 2.F - 44.F;
+			float h = 16.F;
+			char line[64];
+			char num_buf[32];
+
+			glColor3ub(team->red, team->green, team->blue);
+			format_comma(num_buf, particle_stats_count);
+			sprintf(line, "Particles: %s", num_buf);
+			hud_font_render(x, y, h, line, 1.F);
+
+			format_comma(num_buf, (int)particle_stats_created_per_second);
+			sprintf(line, "New Parts/s: %s", num_buf);
+			hud_font_render(x, y + h, h, line, 1.F);
+
+			format_comma(num_buf, particle_stats_vertices);
+			sprintf(line, "Vertices: %s", num_buf);
+			hud_font_render(x, y + h * 2, h, line, 1.F);
+
+			format_comma(num_buf, model_loaded_count() + 1);
+			sprintf(line, "Models: %s", num_buf);
+			hud_font_render(x, y + h * 3, h, line, 1.F);
+
+			format_comma(num_buf, model_total_voxels() + map_total_blocks());
+			sprintf(line, "Voxels: %s", num_buf);
+			hud_font_render(x, y + h * 4, h, line, 1.F);
 
 			font_select(FONT_FIXEDSYS);
 		}

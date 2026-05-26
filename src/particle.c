@@ -40,6 +40,10 @@ struct tesselator particle_tesselator;
 static float rain_timer = 0.0F;
 static float snow_timer = 0.0F;
 
+int particle_stats_count = 0;
+int particle_stats_total_created = 0;
+int particle_stats_vertices = 0;
+
 void particle_init() {
 	entitysys_create(&particles, sizeof(struct Particle), 256);
 	tesselator_create(&particle_tesselator, VERTEX_FLOAT, 0);
@@ -118,6 +122,7 @@ static bool particle_update_single(void* obj, void* user) {
 
 void particle_update(float dt) {
 	entitysys_iterate(&particles, &dt, particle_update_single);
+	particle_stats_count = particles.count;
 }
 
 static bool particle_render_single(void* obj, void* user) {
@@ -131,12 +136,21 @@ static bool particle_render_single(void* obj, void* user) {
 	float fade_time = (p->type == 254) ? 16.0F : 2.6F; // Snow (type 254) takes 16 seconds to fade, rain takes 2.6 (30% longer)
 	float size = p->size / 2.0F * (1.0F - ((float)(window_time() - p->fade) / fade_time));
 
-	if(p->type == 255 || p->type == 254) {
-		tesselator_set_color(tess, p->color);
+	tesselator_set_color(tess, p->color);
 
-		// Render optimized 8-vertex cubes (2 faces) by default, or full 24-vertex cubes (6 faces) if 3D snow is enabled
-		if(settings.snow_3d && p->type == 254) {
-			// Full 6-face cube for 3D snow mode
+	if(p->type == 255) {
+		// Block break / spade hit / gun hit particles - always full 3D (6 faces = 24 vertices)
+		particle_stats_vertices += 24;
+		tesselator_addf_cube_face(tess, CUBE_FACE_X_N, p->x - size, p->y - size, p->z - size, size * 2.0F);
+		tesselator_addf_cube_face(tess, CUBE_FACE_X_P, p->x - size, p->y - size, p->z - size, size * 2.0F);
+		tesselator_addf_cube_face(tess, CUBE_FACE_Y_N, p->x - size, p->y - size, p->z - size, size * 2.0F);
+		tesselator_addf_cube_face(tess, CUBE_FACE_Y_P, p->x - size, p->y - size, p->z - size, size * 2.0F);
+		tesselator_addf_cube_face(tess, CUBE_FACE_Z_N, p->x - size, p->y - size, p->z - size, size * 2.0F);
+		tesselator_addf_cube_face(tess, CUBE_FACE_Z_P, p->x - size, p->y - size, p->z - size, size * 2.0F);
+	} else if(p->type == 254 || p->type == 253) {
+		// Rain (253) and Snow (254) - 2D unless 3D setting enabled
+		if(settings.rain_snow_3d) {
+			particle_stats_vertices += 24;
 			tesselator_addf_cube_face(tess, CUBE_FACE_X_N, p->x - size, p->y - size, p->z - size, size * 2.0F);
 			tesselator_addf_cube_face(tess, CUBE_FACE_X_P, p->x - size, p->y - size, p->z - size, size * 2.0F);
 			tesselator_addf_cube_face(tess, CUBE_FACE_Y_N, p->x - size, p->y - size, p->z - size, size * 2.0F);
@@ -144,7 +158,7 @@ static bool particle_render_single(void* obj, void* user) {
 			tesselator_addf_cube_face(tess, CUBE_FACE_Z_N, p->x - size, p->y - size, p->z - size, size * 2.0F);
 			tesselator_addf_cube_face(tess, CUBE_FACE_Z_P, p->x - size, p->y - size, p->z - size, size * 2.0F);
 		} else {
-			// Optimized 2-face rendering for rain and non-3D snow
+			particle_stats_vertices += 8;
 			tesselator_addf_cube_face(tess, CUBE_FACE_X_N, p->x - size, p->y - size, p->z - size, size * 2.0F);
 			tesselator_addf_cube_face(tess, CUBE_FACE_X_P, p->x - size, p->y - size, p->z - size, size * 2.0F);
 		}
@@ -152,6 +166,7 @@ static bool particle_render_single(void* obj, void* user) {
 		struct kv6_t* casing = weapon_casing(p->type);
 
 		if(casing) {
+			particle_stats_vertices += casing->voxel_count * 24;
 			matrix_push(matrix_model);
 			matrix_identity(matrix_model);
 			matrix_translate(matrix_model, p->x, p->y, p->z);
@@ -168,6 +183,7 @@ static bool particle_render_single(void* obj, void* user) {
 
 void particle_render() {
 	tesselator_clear(&particle_tesselator);
+	particle_stats_vertices = 0;
 
 	entitysys_iterate(&particles, &particle_tesselator, particle_render_single);
 
@@ -192,6 +208,7 @@ void particle_create_casing(struct Player* p) {
 					  .type = p->weapon,
 					  .color = 0x00FFFF,
 				  });
+	particle_stats_total_created++;
 }
 
 void particle_create(unsigned int color, float x, float y, float z, float velocity, float velocity_y, int amount,
@@ -219,6 +236,7 @@ void particle_create(unsigned int color, float x, float y, float z, float veloci
 						  .color = color,
 						  .type = 255,
 					  });
+		particle_stats_total_created++;
 	}
 }
 
@@ -241,7 +259,7 @@ void particle_create_rain(void) {
 	float rain_height = player_y + 40.0F; // Spawn twice as high (was 20.0F, now 40.0F)
 	float render_dist = sqrtf(settings.render_distance * settings.render_distance);
 
-	int particles_per_frame = 225; // Increased by 50% (was 150)
+	int particles_per_frame = 450; // Doubled (was 225)
 
 	for(int i = 0; i < particles_per_frame; i++) {
 		float offset_x = (((float)rand() / (float)RAND_MAX) * 2.0F - 1.0F) * render_dist;
@@ -265,8 +283,9 @@ void particle_create_rain(void) {
 						  .vz = 0.0F,
 						  .fade = window_time(),
 						  .color = rgba(0x00, 0x00, 0xCC, 0xFF),
-						  .type = 255,
+						  .type = 253,
 					  });
+		particle_stats_total_created++;
 	}
 }
 
@@ -315,5 +334,6 @@ void particle_create_snow(void) {
 						  .color = rgba(0xFF, 0xFF, 0xFF, 0xFF), // White color for snow
 						  .type = 254, // Special type for snow (different fade time)
 					  });
+		particle_stats_total_created++;
 	}
 }

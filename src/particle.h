@@ -32,6 +32,10 @@ struct Particle {
 	unsigned int color;
 };
 
+extern int particle_stats_count;
+extern int particle_stats_total_created;
+extern int particle_stats_vertices;
+
 void particle_init(void);
 void particle_update(float dt);
 void particle_render(void);

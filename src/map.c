@@ -717,3 +717,15 @@ void map_copy_blocks(struct libvxl_chunk_copy* copy, size_t x, size_t y) {
 	libvxl_copy_chunk(&map, copy, x, y);
 	pthread_rwlock_unlock(&map_lock);
 }
+
+int map_total_blocks(void) {
+	pthread_rwlock_rdlock(&map_lock);
+	size_t bits = (size_t)map.width * map.height * map.depth;
+	size_t words = (bits + sizeof(size_t) * 8 - 1) / (sizeof(size_t) * 8);
+	int total = 0;
+	for(size_t i = 0; i < words; i++) {
+		total += __builtin_popcountl(map.geometry[i]);
+	}
+	pthread_rwlock_unlock(&map_lock);
+	return total;
+}

@@ -64,6 +64,46 @@ static void kv6_load_file(struct kv6_t* kv6, char* filename, float scale) {
 	free(data);
 }
 
+int model_loaded_count(void) {
+	int count = 0;
+	if(model_playerdead.voxels) count++;
+	if(model_playerhead.voxels) count++;
+	if(model_playertorso.voxels) count++;
+	if(model_playertorsoc.voxels) count++;
+	if(model_playerarms.voxels) count++;
+	if(model_playerleg.voxels) count++;
+	if(model_playerlegc.voxels) count++;
+	if(model_intel.voxels) count++;
+	if(model_tent.voxels) count++;
+	if(model_semi.voxels) count++;
+	if(model_smg.voxels) count++;
+	if(model_shotgun.voxels) count++;
+	if(model_spade.voxels) count++;
+	if(model_block.voxels) count++;
+	if(model_grenade.voxels) count++;
+	if(model_semi_tracer.voxels) count++;
+	if(model_smg_tracer.voxels) count++;
+	if(model_shotgun_tracer.voxels) count++;
+	if(model_semi_casing.voxels) count++;
+	if(model_smg_casing.voxels) count++;
+	if(model_shotgun_casing.voxels) count++;
+	return count;
+}
+
+int model_total_voxels(void) {
+	return model_playerdead.voxel_count + model_playerhead.voxel_count
+		+ model_playertorso.voxel_count + model_playertorsoc.voxel_count
+		+ model_playerarms.voxel_count + model_playerleg.voxel_count
+		+ model_playerlegc.voxel_count + model_intel.voxel_count
+		+ model_tent.voxel_count + model_semi.voxel_count
+		+ model_smg.voxel_count + model_shotgun.voxel_count
+		+ model_spade.voxel_count + model_block.voxel_count
+		+ model_grenade.voxel_count + model_semi_tracer.voxel_count
+		+ model_smg_tracer.voxel_count + model_shotgun_tracer.voxel_count
+		+ model_semi_casing.voxel_count + model_smg_casing.voxel_count
+		+ model_shotgun_casing.voxel_count;
+}
+
 static void kv6_check_dimensions(struct kv6_t* kv6, float max) {
 	if(max(max(kv6->xsiz, kv6->ysiz), kv6->zsiz) * kv6->scale > max) {
 		log_error("Model dimensions too large");
