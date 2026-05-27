@@ -133,7 +133,7 @@ jobs:
                   -DCMAKE_INSTALL_PREFIX=$DEPS \
                   -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
 
-          # GLEW (static) -- consumed via builtin FindGLEW -> GLEW::GLEW
+          # GLEW (static)
           if [ ! -f "$DEPS/lib/libGLEW.a" ]; then
             curl -L -o glew.tgz https://github.com/nigels-com/glew/releases/download/glew-2.2.0/glew-2.2.0.tgz
             tar xzf glew.tgz
@@ -142,7 +142,7 @@ jobs:
             cmake --install glew-build
           fi
 
-          # enet (static) -- consumed via Findenet -> enet::enet
+          # enet (static)
           if [ ! -f "$DEPS/lib/libenet.a" ]; then
             curl -L -o enet.tar.gz https://github.com/lsalzman/enet/archive/refs/tags/v1.3.18.tar.gz
             tar xzf enet.tar.gz
@@ -152,7 +152,7 @@ jobs:
             cp -r enet-1.3.18/include/enet "$DEPS/include/"
           fi
 
-          # libdeflate (static) -- consumed via Finddeflate -> deflate::deflate
+          # libdeflate (static)
           if [ ! -f "$DEPS/lib/libdeflate.a" ]; then
             curl -L -o libdeflate.tar.gz https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.19.tar.gz
             tar xzf libdeflate.tar.gz
@@ -168,16 +168,14 @@ jobs:
         if: matrix.platform == 'macos'
         run: |
           # macOS lacks pthread_spinlock_t; replace with pthread_mutex_t
-          sed -i 's/pthread_spinlock_t/pthread_mutex_t/g' src/chunk.c
-          sed -i 's/pthread_spin_init(\&chunk_block_queue_lock, PTHREAD_PROCESS_PRIVATE)/pthread_mutex_init(\&chunk_block_queue_lock, NULL)/' src/chunk.c
-          sed -i 's/pthread_spin_lock/pthread_mutex_lock/g' src/chunk.c
-          sed -i 's/pthread_spin_unlock/pthread_mutex_unlock/g' src/chunk.c
+          sed -i '' 's/pthread_spinlock_t/pthread_mutex_t/g' src/chunk.c
+          sed -i '' 's/pthread_spin_init(&chunk_block_queue_lock, PTHREAD_PROCESS_PRIVATE)/pthread_mutex_init(\&chunk_block_queue_lock, NULL)/' src/chunk.c
+          sed -i '' 's/pthread_spin_lock/pthread_mutex_lock/g' src/chunk.c
+          sed -i '' 's/pthread_spin_unlock/pthread_mutex_unlock/g' src/chunk.c
           # Fix abs() on float values in camera.c
-          sed -i 's/int xr = abs(errx)/int xr = (int)fabsf(errx)/' src/camera.c
-          sed -i 's/int yr = abs(erry)/int yr = (int)fabsf(erry)/' src/camera.c
-          sed -i 's/int zr = abs(errz)/int zr = (int)fabsf(errz)/' src/camera.c
-          # Guard GLEW_STATIC to avoid redefinition warning
-          sed -i 's/#define GLEW_STATIC/#ifndef GLEW_STATIC\n#define GLEW_STATIC\n#endif/' src/common.h
+          sed -i '' 's/int xr = abs(errx)/int xr = (int)fabsf(errx)/' src/camera.c
+          sed -i '' 's/int yr = abs(erry)/int yr = (int)fabsf(erry)/' src/camera.c
+          sed -i '' 's/int zr = abs(errz)/int zr = (int)fabsf(errz)/' src/camera.c
 
       - name: Build (macOS)
         if: matrix.platform == 'macos'
