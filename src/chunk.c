@@ -42,7 +42,7 @@ struct chunk chunks[CHUNKS_PER_DIM * CHUNKS_PER_DIM];
 HashTable chunk_block_queue;
 struct channel chunk_work_queue;
 struct channel chunk_result_queue;
-pthread_mutex_t chunk_block_queue_lock;
+pthread_spinlock_t chunk_block_queue_lock;
 
 struct chunk_work_packet {
 	size_t chunk_x;
@@ -76,9 +76,9 @@ void chunk_init() {
 
 	channel_create(&chunk_work_queue, sizeof(struct chunk_work_packet), CHUNKS_PER_DIM * CHUNKS_PER_DIM);
 	channel_create(&chunk_result_queue, sizeof(struct chunk_result_packet), CHUNKS_PER_DIM * CHUNKS_PER_DIM);
-	ht_setup(&chunk_block_queue, sizeof(struct chunk*), sizeof(struct chunk_result_packet), 64);
+	ht_setup(&chunk_block_queue, sizeof(struct chunk*), sizeof(struct chunk_work_packet), 64);
 
-	pthread_mutex_init(&chunk_block_queue_lock, NULL);
+	pthread_spin_init(&chunk_block_queue_lock, PTHREAD_PROCESS_PRIVATE);
 
 	int chunk_enabled_cores = min(max(window_cpucores() / 2, 1), CHUNK_WORKERS_MAX);
 	log_info("%i cores enabled for chunk generation", chunk_enabled_cores);
@@ -833,14 +833,14 @@ void chunk_rebuild_all() {
 void chunk_block_update(int x, int y, int z) {
 	struct chunk* c = chunks + (x / CHUNK_SIZE) + (z / CHUNK_SIZE) * CHUNKS_PER_DIM;
 
-	pthread_mutex_lock(&chunk_block_queue_lock);
+	pthread_spin_lock(&chunk_block_queue_lock);
 	ht_insert(&chunk_block_queue, &c,
 			  &(struct chunk_work_packet) {
 				  .chunk = c,
 				  .chunk_x = c->x,
 				  .chunk_y = c->y,
 			  });
-	pthread_mutex_unlock(&chunk_block_queue_lock);
+	pthread_spin_unlock(&chunk_block_queue_lock);
 }
 
 static bool iterate_chunk_updates(void* key, void* value, void* user) {
@@ -850,8 +850,8 @@ static bool iterate_chunk_updates(void* key, void* value, void* user) {
 }
 
 void chunk_queue_blocks() {
-	pthread_mutex_lock(&chunk_block_queue_lock);
+	pthread_spin_lock(&chunk_block_queue_lock);
 	ht_iterate(&chunk_block_queue, NULL, iterate_chunk_updates);
 	ht_clear(&chunk_block_queue);
-	pthread_mutex_unlock(&chunk_block_queue_lock);
+	pthread_spin_unlock(&chunk_block_queue_lock);
 }

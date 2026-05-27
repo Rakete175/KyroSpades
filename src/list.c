@@ -76,9 +76,11 @@ void* list_add(struct list* l, void* e) {
 	assert(l != NULL);
 
 	if((l->elements + 1) * l->element_size > l->mem_size) {
-		l->mem_size += l->element_size * 64;
-		l->data = realloc(l->data, l->mem_size);
-		CHECK_ALLOCATION_ERROR(l->data)
+		size_t new_mem_size = l->mem_size > 0 ? l->mem_size * 2 : l->element_size * 64;
+		void* new_data = realloc(l->data, new_mem_size);
+		CHECK_ALLOCATION_ERROR(new_data)
+		l->data = new_data;
+		l->mem_size = new_mem_size;
 	}
 
 	if(e)

@@ -1027,14 +1027,14 @@ void network_updateColor() {
 	network_send(PACKET_SETCOLOR_ID, &c, sizeof(c));
 }
 
-unsigned char network_send_tmp[512];
 void network_send(int id, void* data, int len) {
 	if(demo_is_playing()) return;
 	if(network_connected) {
 		network_stats[0].outgoing += len + 1;
-		network_send_tmp[0] = id;
-		memcpy(network_send_tmp + 1, data, len);
-		enet_peer_send(peer, 0, enet_packet_create(network_send_tmp, len + 1, ENET_PACKET_FLAG_RELIABLE));
+		unsigned char tmp[512];
+		tmp[0] = id;
+		memcpy(tmp + 1, data, len);
+		enet_peer_send(peer, 0, enet_packet_create(tmp, len + 1, ENET_PACKET_FLAG_RELIABLE));
 	}
 }
 

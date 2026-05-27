@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "channel.h"
+#include "common.h"
 
 static void channel_sanity_checks(struct channel* ch) {
 	assert(ch != NULL);
@@ -74,10 +75,7 @@ bool channel_create(struct channel* ch, size_t object_size, size_t length) {
 size_t channel_size(struct channel* ch) {
 	assert(ch != NULL);
 
-	pthread_mutex_lock(&ch->lock);
-	size_t res = ch->count;
-	pthread_mutex_unlock(&ch->lock);
-	return res;
+	return __atomic_load_n(&ch->count, __ATOMIC_RELAXED);
 }
 
 void channel_destroy(struct channel* ch) {
@@ -94,7 +92,11 @@ static void channel_grow(struct channel* ch) {
 
 	size_t length = ch->length * 2;
 
-	ch->queue = realloc(ch->queue, ch->object_size * length);
+	void* new_queue = realloc(ch->queue, ch->object_size * length);
+	if(!new_queue)
+		return;
+
+	ch->queue = new_queue;
 
 	if(ch->loc_insert <= ch->loc_remove) {
 		size_t object_count = ch->length - ch->loc_remove;
@@ -130,14 +132,16 @@ static void channel_shrink(struct channel* ch) {
 		size_t object_count = ch->length - ch->loc_remove;
 		size_t new_remove_loc = length - object_count;
 
-		memcpy((uint8_t*)ch->queue + new_remove_loc * ch->object_size,
+		memmove((uint8_t*)ch->queue + new_remove_loc * ch->object_size,
 			   (uint8_t*)ch->queue + ch->loc_remove * ch->object_size, object_count * ch->object_size);
 
 		ch->loc_remove = new_remove_loc;
 	}
 
 	ch->length = length;
-	ch->queue = realloc(ch->queue, ch->object_size * ch->length);
+	void* new_queue = realloc(ch->queue, ch->object_size * ch->length);
+	if(new_queue)
+		ch->queue = new_queue;
 	ch->loc_remove %= ch->length;
 	ch->loc_insert %= ch->length;
 

@@ -1591,13 +1591,9 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 			sprintf(line, "Vertices: %s", num_buf);
 			hud_font_render(x, y + h * 2, h, line, 1.F);
 
-			format_comma(num_buf, model_loaded_count() + 1);
-			sprintf(line, "Models: %s", num_buf);
-			hud_font_render(x, y + h * 3, h, line, 1.F);
-
 			format_comma(num_buf, model_total_voxels() + map_total_blocks());
 			sprintf(line, "Voxels: %s", num_buf);
-			hud_font_render(x, y + h * 4, h, line, 1.F);
+			hud_font_render(x, y + h * 3, h, line, 1.F);
 
 			font_select(FONT_FIXEDSYS);
 		}

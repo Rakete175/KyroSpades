@@ -100,6 +100,8 @@ struct Sound_wav sound_impact;
 struct Sound_wav sound_zoomin;
 struct Sound_wav sound_zoomout;
 
+struct Sound_wav sound_screenshot;
+
 void sound_volume(float vol) {
 #ifdef USE_SOUND
 	if(sound_enabled)
@@ -340,5 +342,7 @@ void sound_init() {
 
 	sound_load(&sound_zoomin, "wav/zoomin.wav", 0.1F, 1024.0F);
 	sound_load(&sound_zoomout, "wav/zoomout.wav", 0.1F, 1024.0F);
+
+	sound_load(&sound_screenshot, "wav/screenshot.wav", 0.1F, 1024.0F);
 #endif
 }

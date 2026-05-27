@@ -47,6 +47,7 @@ int map_size_z = 512;
 
 static struct libvxl_map map;
 static pthread_rwlock_t map_lock;
+static int total_blocks_cache = -1;
 
 float fog_color[4] = {0.5F, 0.9098F, 1.0F, 1.0F};
 
@@ -534,6 +535,7 @@ void map_set(int x, int y, int z, unsigned int color) {
 		return;
 
 	pthread_rwlock_wrlock(&map_lock);
+	total_blocks_cache = -1;
 
 	if(color == 0xFFFFFFFF) {
 		libvxl_map_setair(&map, x, z, map_size_y - 1 - y);
@@ -701,6 +703,7 @@ int map_placedblock_color(int color) {
 
 void map_vxl_load(void* v, size_t size) {
 	pthread_rwlock_wrlock(&map_lock);
+	total_blocks_cache = -1;
 	libvxl_free(&map);
 	libvxl_create(&map, 512, 512, 64, v, size);
 	pthread_rwlock_unlock(&map_lock);
@@ -719,6 +722,9 @@ void map_copy_blocks(struct libvxl_chunk_copy* copy, size_t x, size_t y) {
 }
 
 int map_total_blocks(void) {
+	if(total_blocks_cache >= 0)
+		return total_blocks_cache;
+
 	pthread_rwlock_rdlock(&map_lock);
 	size_t bits = (size_t)map.width * map.height * map.depth;
 	size_t words = (bits + sizeof(size_t) * 8 - 1) / (sizeof(size_t) * 8);
@@ -727,5 +733,7 @@ int map_total_blocks(void) {
 		total += __builtin_popcountl(map.geometry[i]);
 	}
 	pthread_rwlock_unlock(&map_lock);
+
+	total_blocks_cache = total;
 	return total;
 }

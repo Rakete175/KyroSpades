@@ -319,7 +319,7 @@ size_t _ht_default_hash(void* raw_key, size_t key_size) {
 
 size_t _ht_hash(const HashTable* table, void* key) {
 #ifdef HT_USING_POWER_OF_TWO
-	return table->hash(key, table->key_size) & table->capacity;
+	return table->hash(key, table->key_size) & (table->capacity - 1);
 #else
 	return table->hash(key, table->key_size) % table->capacity;
 #endif
@@ -336,7 +336,7 @@ bool _ht_should_grow(HashTable* table) {
 
 bool _ht_should_shrink(HashTable* table) {
 	assert(table->size <= table->capacity);
-	return table->size == table->capacity * HT_SHRINK_THRESHOLD;
+	return table->size <= table->capacity / HT_SHRINK_THRESHOLD;
 }
 
 HTNode*

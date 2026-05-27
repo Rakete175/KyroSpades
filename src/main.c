@@ -59,6 +59,12 @@ int ms_rand() {
 	return (ms_seed >> 0x10) & 0x7FFF;
 }
 
+static struct {
+	bool active;
+	double start_time;
+	int texture;
+} screenshot_anim = {0};
+
 int chat_input_mode = CHAT_NO_INPUT;
 
 char chat[3][128][256] = {0}; // chat[0] is current input
@@ -567,6 +573,45 @@ void display() {
 		}
 	}
 
+	if(screenshot_anim.active && screenshot_anim.texture) {
+		double elapsed = window_time() - screenshot_anim.start_time;
+		float t = (float)(elapsed / 1.5);
+		if(t >= 1.0F) {
+			screenshot_anim.active = false;
+			glDeleteTextures(1, (GLuint*)&screenshot_anim.texture);
+			screenshot_anim.texture = 0;
+		} else {
+			float target_scale = 1.0F / 6.0F;
+			float margin = 10.0F;
+			float shrink_end = 0.2F;
+			float fade_start = 0.63F;
+			float ease = min(t / shrink_end, 1.0F);
+			float w = (float)settings.window_width * (1.0F + (target_scale - 1.0F) * ease);
+			float h = (float)settings.window_height * (1.0F + (target_scale - 1.0F) * ease);
+			float x = margin * ease;
+			float y = (float)settings.window_height - margin * ease;
+			float alpha = t <= fade_start ? 1.0F : 1.0F - (t - fade_start) / (1.0F - fade_start);
+
+			glEnable(GL_BLEND);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+			glEnable(GL_TEXTURE_2D);
+			glBindTexture(GL_TEXTURE_2D, screenshot_anim.texture);
+			glColor4f(1.0F, 1.0F, 1.0F, alpha);
+			texture_draw_empty(x, y, w, h);
+			glDisable(GL_TEXTURE_2D);
+			glLineWidth(2.0F);
+			glColor4f(1.0F, 1.0F, 1.0F, alpha);
+			glBegin(GL_LINE_LOOP);
+			glVertex2f(x, y);
+			glVertex2f(x + w, y);
+			glVertex2f(x + w, y - h);
+			glVertex2f(x, y - h);
+			glEnd();
+			glBindTexture(GL_TEXTURE_2D, 0);
+			glDisable(GL_BLEND);
+		}
+	}
+
 	if(settings.multisamples > 0)
 		glEnable(GL_MULTISAMPLE);
 }
@@ -749,7 +794,9 @@ void keys(struct window_instance* window, int key, int scancode, int action, int
 
 		unsigned char* pic_data = malloc(settings.window_width * settings.window_height * 4 * 2);
 		CHECK_ALLOCATION_ERROR(pic_data)
+		glReadBuffer(GL_FRONT);
 		glReadPixels(0, 0, settings.window_width, settings.window_height, GL_RGBA, GL_UNSIGNED_BYTE, pic_data);
+		glReadBuffer(GL_BACK);
 
 		for(int y = 0; y < settings.window_height; y++) { // mirror image (top-bottom)
 			for(int x = 0; x < settings.window_width; x++)
@@ -760,10 +807,27 @@ void keys(struct window_instance* window, int key, int scancode, int action, int
 
 		lodepng_encode32_file(pic_name, pic_data + settings.window_width * settings.window_height * 4,
 							  settings.window_width, settings.window_height);
+
+		if(screenshot_anim.texture)
+			glDeleteTextures(1, (GLuint*)&screenshot_anim.texture);
+		glGenTextures(1, (GLuint*)&screenshot_anim.texture);
+		glBindTexture(GL_TEXTURE_2D, screenshot_anim.texture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, settings.window_width, settings.window_height, 0, GL_RGBA,
+					 GL_UNSIGNED_BYTE, pic_data + settings.window_width * settings.window_height * 4);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		screenshot_anim.active = true;
+		screenshot_anim.start_time = window_time();
+
 		free(pic_data);
 
 		sprintf(pic_name, "Saved screenshot as screenshots/%ld.png", (long)pic_time);
 		chat_add(0, 0x00FFFF, pic_name);
+
+		sound_create(SOUND_LOCAL, &sound_screenshot, 0.0F, 0.0F, 0.0F);
 	}
 
 	if(key == WINDOW_KEY_SAVE_MAP && action == WINDOW_PRESS) { // save map
