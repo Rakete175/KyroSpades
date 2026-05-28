@@ -1,6 +1,6 @@
 # KyroSpades (Enhanced ButterSpades)
 This project is a modified fork of [ButterSpades](https://github.com/utf-4096/butterspades), introducing several quality-of-life improvements and visual enhancements. Link: https://github.com/Kyrope01/KyroSpades
-#### Date of latest update: 27th May, 2026
+#### Date of latest update: 28th May, 2026
 
 ## New Features
 | Feature | Description |
@@ -27,6 +27,9 @@ This project is a modified fork of [ButterSpades](https://github.com/utf-4096/bu
 | **Visible Team Scores at Top** | Score table does not need to be opened for seeing score of teams, a small score display is always visible. |
 | **Player Statistics Display Added** | A setting which when enabled displays player stats on left side of screen, the stats displayed are: distance traveled, number of jumps, number of kills, total number of blocks placed, number of headshot kills and the number of deaths. |
 | **Player Stats & Technical Stats Display** | Displays player stats (blocks traveled, no. of times jumped, kills, deaths, no. of headshot kills and blocks placed) and displays technical stats (no. of voxels loaded, no. of particles loaded, no. of vertices of particles, no. of particles being created per second). |
+| **Settings Apply Instantly When Changed**| You now don't need to scroll and click on apply changes button for the settings to apply, they are applied as soon as a value is changed.** |
+| **Custom Coloring** | You can now adjust exposure, saturation, contrast and vignette of game during gameplay to make the game look better. |
+
 
 ## Quick Setup: Dynamic Wallpapers
 To add custom wallpapers, in folder named `bg` inside the `png` folder in directory of your client. Drop any `.png` images you like into that folder, and the client will cycle through them randomly each time you start the game.
