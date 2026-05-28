@@ -320,6 +320,9 @@ void config_save() {
 	config_seti("client", "rain", settings.rain);
 	config_seti("client", "snow", settings.snow);
 	config_seti("client", "rain_snow_3d", settings.rain_snow_3d);
+	config_setf("client", "exposure", settings.exposure);
+	config_setf("client", "saturation", settings.saturation);
+	config_setf("client", "contrast", settings.contrast);
 	config_setf("client", "rifle_ads_fov", settings.rifle_ads_fov);
 	config_setf("client", "shotgun_ads_fov", settings.shotgun_ads_fov);
 	config_setf("client", "smg_ads_fov", settings.smg_ads_fov);
@@ -409,6 +412,9 @@ static int config_read_key(void* user, const char* section, const char* name, co
 		IMPORT_SETTING(settings.rain, rain, atoi(value));
 		IMPORT_SETTING(settings.snow, snow, atoi(value));
 		IMPORT_SETTING(settings.rain_snow_3d, rain_snow_3d, atoi(value));
+		IMPORT_SETTING(settings.exposure, exposure, fmaxf(-100.0F, fminf(atof(value), 100.0F)));
+		IMPORT_SETTING(settings.saturation, saturation, fmaxf(-100.0F, fminf(atof(value), 100.0F)));
+		IMPORT_SETTING(settings.contrast, contrast, fmaxf(-100.0F, fminf(atof(value), 100.0F)));
 		IMPORT_SETTING(settings.rifle_ads_fov, rifle_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
 		IMPORT_SETTING(settings.shotgun_ads_fov, shotgun_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
 		IMPORT_SETTING(settings.smg_ads_fov, smg_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
@@ -737,6 +743,7 @@ void config_reload() {
 				 .max = CAMERA_MAX_FOV,
 				 .name = "Camera FOV",
 				 .help = "Field of View in degrees",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -754,6 +761,7 @@ void config_reload() {
 				 .max = INT_MAX,
 				 .name = "Game width",
 				 .help = "Default: 960",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -763,6 +771,7 @@ void config_reload() {
 				 .max = INT_MAX,
 				 .name = "Game height",
 				 .help = "Default: 540",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -771,15 +780,8 @@ void config_reload() {
 				 .min = 0,
 				 .max = INT_MAX,
 				 .name = "V-Sync",
-				 .help = "Limits your game's fps",
-				 .defaults = 0,
-				 1,
-				 60,
-				 120,
-				 144,
-				 240,
-				 .defaults_length = 6,
 				 .label_callback = config_label_vsync,
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -788,6 +790,7 @@ void config_reload() {
 				 .min = 0,
 				 .max = 1,
 				 .name = "Fullscreen",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -804,6 +807,7 @@ void config_reload() {
 				 16,
 				 .defaults_length = 5,
 				 .label_callback = config_label_msaa,
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -813,6 +817,7 @@ void config_reload() {
 				 .max = 1,
 				 .help = "Render models like in voxlap",
 				 .name = "Voxlap models",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -822,7 +827,7 @@ void config_reload() {
 				 .max = 1,
 				 .help = "Render player hand during gameplay",
 				 .name = "Render hand",
-				 .category = "KyroSpades Settings",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -841,6 +846,7 @@ void config_reload() {
 				 .max = 1,
 				 .help = "Join similar mesh faces",
 				 .name = "Greedy meshing",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -850,6 +856,7 @@ void config_reload() {
 				 .max = 1,
 				 .help = "Enable this on buggy drivers",
 				 .name = "Force Displaylist",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -859,6 +866,7 @@ void config_reload() {
 				 .max = 1,
 				 .help = "Enable this on buggy drivers",
 				 .name = "Smooth fog",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -868,6 +876,7 @@ void config_reload() {
 				 .max = 1,
 				 .help = "(won't work with greedy mesh)",
 				 .name = "Ambient occlusion",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -877,7 +886,7 @@ void config_reload() {
 				 .max = 5,
 				 .help = "Multiplier for ambient occlusion strength",
 				 .name = "AO multiplier",
-				 .category = "KyroSpades Settings",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -887,6 +896,7 @@ void config_reload() {
 				 .max = 1,
 				 .name = "Show fps",
 				 .help = "Show current fps and ping ingame",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -923,6 +933,7 @@ void config_reload() {
 				 .max = 1,
 				 .name = "Tile background",
 				 .help = "Background will be stretched if disabled",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -931,6 +942,7 @@ void config_reload() {
 				 .min = 0,
 				 .max = 2,
 				 .name = "Tile speed",
+				 .category = "Graphic Settings",
 				 .help = "The speed at which the tiles move",
 			 });
 	list_add(&config_settings,
@@ -968,6 +980,7 @@ void config_reload() {
 				 .max = 255,
 				 .name = "Lighten colors",
 				 .help = "Makes in-game team colors in the HUD brighter",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -1081,6 +1094,7 @@ void config_reload() {
 				 .max = 1,
 				 .help = "Use weapon-specific iron sights instead of a dot",
 				 .name = "Iron sight",
+				 .category = "Graphic Settings",
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
@@ -1136,7 +1150,7 @@ void config_reload() {
 				 .max = 1,
 				 .help = "Enable zoom animation when aiming down sights (ADS)",
 				 .name = "ADS zoom animation",
-				 .category = "KyroSpades Settings",
+				 .category = "Graphic Settings",
 			 });
 
 	list_add(&config_settings,
@@ -1203,6 +1217,50 @@ void config_reload() {
 				 .help = "Enable 3D rain and snow (full cube rendering)",
 				 .name = "3D Rain & Snow",
 				 .category = "Weather",
+			 });
+
+	list_add(&config_settings,
+			 &(struct config_setting) {
+				 .value = &settings_tmp.exposure,
+				 .type = CONFIG_TYPE_FLOAT,
+				 .min = -100,
+				 .max = 100,
+				 .help = "Adjust image exposure (-100 to +100)",
+				 .name = "Exposure",
+				 .category = "Graphic Settings",
+			 });
+
+	list_add(&config_settings,
+			 &(struct config_setting) {
+				 .value = &settings_tmp.saturation,
+				 .type = CONFIG_TYPE_FLOAT,
+				 .min = -100,
+				 .max = 100,
+				 .help = "Adjust image saturation (-100 to +100)",
+				 .name = "Saturation",
+				 .category = "Graphic Settings",
+			 });
+
+	list_add(&config_settings,
+			 &(struct config_setting) {
+				 .value = &settings_tmp.contrast,
+				 .type = CONFIG_TYPE_FLOAT,
+				 .min = -100,
+				 .max = 100,
+				 .help = "Adjust image contrast (-100 to +100)",
+				 .name = "Contrast",
+				 .category = "Graphic Settings",
+			 });
+
+	list_add(&config_settings,
+			 &(struct config_setting) {
+				 .value = &settings_tmp.vignette,
+				 .type = CONFIG_TYPE_FLOAT,
+				 .min = 0,
+				 .max = 100,
+				 .help = "Darkens edges of the screen (0 to 100)",
+				 .name = "Vignette",
+				 .category = "Graphic Settings",
 			 });
 
 	list_add(&config_settings,

@@ -23,6 +23,7 @@
 #include <math.h>
 
 #include "lodepng/lodepng.h"
+#include "glx.h"
 #include "common.h"
 #include "file.h"
 #include "font.h"
@@ -64,6 +65,19 @@ static struct {
 	double start_time;
 	int texture;
 } screenshot_anim = {0};
+
+static struct {
+	unsigned int texture;
+	unsigned int shader;
+	unsigned int fbo;
+	unsigned int depth_rb;
+	int w;
+	int h;
+	int uni_exposure;
+	int uni_saturation;
+	int uni_contrast;
+	int uni_vignette;
+} postproc = {0};
 
 int chat_input_mode = CHAT_NO_INPUT;
 
@@ -246,6 +260,85 @@ void display() {
 		glDepthRange(0.0F, 1.0F);
 
 		chunk_update_all();
+
+		int needs_postproc = (glx_version && (settings.exposure != 0 || settings.saturation != 0 || settings.contrast != 0 || settings.vignette != 0));
+		if(needs_postproc) {
+			if(postproc.fbo && (postproc.w != settings.window_width || postproc.h != settings.window_height)) {
+				glDeleteFramebuffers(1, &postproc.fbo);
+				glDeleteRenderbuffers(1, &postproc.depth_rb);
+				glDeleteTextures(1, &postproc.texture);
+				postproc.fbo = 0;
+				postproc.depth_rb = 0;
+				postproc.texture = 0;
+			}
+
+			if(!postproc.fbo) {
+				glGenTextures(1, &postproc.texture);
+				glBindTexture(GL_TEXTURE_2D, postproc.texture);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, settings.window_width, settings.window_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+				glBindTexture(GL_TEXTURE_2D, 0);
+
+				glGenRenderbuffers(1, &postproc.depth_rb);
+				glBindRenderbuffer(GL_RENDERBUFFER, postproc.depth_rb);
+				glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, settings.window_width, settings.window_height);
+				glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+				glGenFramebuffers(1, &postproc.fbo);
+				glBindFramebuffer(GL_FRAMEBUFFER, postproc.fbo);
+				glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, postproc.texture, 0);
+				glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, postproc.depth_rb);
+
+				if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+					glDeleteFramebuffers(1, &postproc.fbo);
+					glDeleteRenderbuffers(1, &postproc.depth_rb);
+					glDeleteTextures(1, &postproc.texture);
+					postproc.fbo = 0;
+					postproc.depth_rb = 0;
+					postproc.texture = 0;
+				}
+				glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+				postproc.w = settings.window_width;
+				postproc.h = settings.window_height;
+
+				if(!postproc.shader) {
+					const char* vert = "void main(){gl_TexCoord[0]=gl_MultiTexCoord0;gl_Position=ftransform();}";
+					const char* frag =
+						"uniform float exposure;"
+						"uniform float saturation;"
+						"uniform float contrast;"
+						"uniform float vignette;"
+						"uniform sampler2D tex;"
+						"void main(){"
+						"vec4 c=texture2D(tex,gl_TexCoord[0].xy);"
+						"float e=1.0+exposure/100.0;"
+						"c.rgb*=e;"
+						"float g=dot(c.rgb,vec3(0.299,0.587,0.114));"
+						"float s=1.0+saturation/100.0;"
+						"c.rgb=mix(vec3(g),c.rgb,s);"
+						"float ct=1.0+contrast/100.0;"
+						"c.rgb=(c.rgb-0.5)*ct+0.5;"
+						"float vig=1.0-(vignette/100.0)*dot(gl_TexCoord[0].xy-0.5,gl_TexCoord[0].xy-0.5)*4.0;"
+						"c.rgb*=clamp(vig,0.0,1.0);"
+						"c.rgb=clamp(c.rgb,0.0,1.0);"
+						"gl_FragColor=c;}";
+					postproc.shader = glx_shader(vert, frag);
+					if(postproc.shader) {
+						postproc.uni_exposure = glGetUniformLocation(postproc.shader, "exposure");
+						postproc.uni_saturation = glGetUniformLocation(postproc.shader, "saturation");
+						postproc.uni_contrast = glGetUniformLocation(postproc.shader, "contrast");
+						postproc.uni_vignette = glGetUniformLocation(postproc.shader, "vignette");
+					}
+				}
+			}
+
+			if(postproc.fbo)
+				glBindFramebuffer(GL_FRAMEBUFFER, postproc.fbo);
+		}
 
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -486,6 +579,54 @@ void display() {
 			glx_disable_sphericalfog();
 			if(settings.smooth_fog)
 				glDisable(GL_FOG);
+
+			if(needs_postproc) {
+				glMatrixMode(GL_PROJECTION);
+				glPushMatrix();
+				glLoadIdentity();
+				glOrtho(0.0, settings.window_width, 0.0, settings.window_height, -1.0, 1.0);
+				glMatrixMode(GL_MODELVIEW);
+				glPushMatrix();
+				glLoadIdentity();
+
+				glDisable(GL_DEPTH_TEST);
+				glDepthMask(GL_FALSE);
+
+				if(postproc.fbo) {
+					glBindFramebuffer(GL_FRAMEBUFFER, 0);
+					glBindTexture(GL_TEXTURE_2D, postproc.texture);
+				} else if(postproc.texture) {
+					glReadBuffer(GL_BACK);
+					glBindTexture(GL_TEXTURE_2D, postproc.texture);
+					glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, settings.window_width, settings.window_height);
+				}
+
+				if(postproc.shader) {
+					glUseProgram(postproc.shader);
+					glUniform1f(postproc.uni_exposure, settings.exposure);
+					glUniform1f(postproc.uni_saturation, settings.saturation);
+					glUniform1f(postproc.uni_contrast, settings.contrast);
+					glUniform1f(postproc.uni_vignette, settings.vignette);
+
+					glBegin(GL_QUADS);
+					glTexCoord2f(0.0F, 0.0F); glVertex2f(0.0F, 0.0F);
+					glTexCoord2f(1.0F, 0.0F); glVertex2f((float)settings.window_width, 0.0F);
+					glTexCoord2f(1.0F, 1.0F); glVertex2f((float)settings.window_width, (float)settings.window_height);
+					glTexCoord2f(0.0F, 1.0F); glVertex2f(0.0F, (float)settings.window_height);
+					glEnd();
+
+					glUseProgram(0);
+				}
+
+				glBindTexture(GL_TEXTURE_2D, 0);
+				glDepthMask(GL_TRUE);
+				glEnable(GL_DEPTH_TEST);
+
+				glMatrixMode(GL_PROJECTION);
+				glPopMatrix();
+				glMatrixMode(GL_MODELVIEW);
+				glPopMatrix();
+			}
 		}
 	}
 
@@ -805,6 +946,8 @@ void keys(struct window_instance* window, int key, int scancode, int action, int
 				   pic_data + settings.window_width * 4 * (settings.window_height - y - 1), settings.window_width * 4);
 		}
 
+
+
 		lodepng_encode32_file(pic_name, pic_data + settings.window_width * settings.window_height * 4,
 							  settings.window_width, settings.window_height);
 
@@ -891,6 +1034,9 @@ int main(int argc, char** argv) {
 	settings.opengl14 = 1;
 	settings.color_correction = 0;
 	settings.multisamples = 0;
+	settings.exposure = 0;
+	settings.saturation = 0;
+	settings.contrast = 0;
 	settings.shadow_entities = 0;
 	settings.ambient_occlusion = 0;
 	settings.render_distance = 128.0F;

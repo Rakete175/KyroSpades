@@ -1595,6 +1595,17 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 			sprintf(line, "Voxels: %s", num_buf);
 			hud_font_render(x, y + h * 3, h, line, 1.F);
 
+			int* pick_pos = camera_terrain_pick(1);
+			if(pick_pos) {
+				float dx = (pick_pos[0] + 0.5F) - camera_x;
+				float dy = (pick_pos[1] + 0.5F) - camera_y;
+				float dz = (pick_pos[2] + 0.5F) - camera_z;
+				sprintf(line, "Distance: %.1f", sqrt(dx * dx + dy * dy + dz * dz));
+			} else {
+				sprintf(line, "Distance: --");
+			}
+			hud_font_render(x, y + h * 4, h, line, 1.F);
+
 			font_select(FONT_FIXEDSYS);
 		}
 
@@ -3697,6 +3708,13 @@ static void hud_settings_init() {
 	memcpy(&settings_tmp, &settings, sizeof(struct RENDER_OPTIONS));
 }
 
+static void hud_settings_autoapply() {
+	memcpy(&settings, &settings_tmp, sizeof(struct RENDER_OPTIONS));
+	window_fromsettings();
+	sound_volume(settings.volume / 10.0F);
+	config_save();
+}
+
 static int int_slider_defaults(mu_Context* ctx, struct config_setting* setting) {
 	int k = setting->defaults_length - 1;
 	while(k > 0 && setting->defaults[k] > *(int*)setting->value)
@@ -4002,13 +4020,13 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
 
 		}
 
-		if(mu_header_ex(ctx, "All settings", MU_OPT_EXPANDED)) {
+		if(mu_header_ex(ctx, "Graphic Settings", MU_OPT_EXPANDED)) {
 			int width = mu_get_current_container(ctx)->body.w;
 
 			for(int k = 0; k < list_size(&config_settings); k++) {
 				struct config_setting* a = list_get(&config_settings, k);
 
-				if(strcmp(a->category, "KyroSpades Settings") == 0 || strcmp(a->category, "Weapon Settings") == 0 || strcmp(a->category, "Spectator Mode Settings") == 0 || strcmp(a->category, "Weather") == 0)
+				if(strcmp(a->category, "Graphic Settings") != 0)
 					continue;
 
 				mu_layout_row(ctx, 3, (int[]) {0.65F * width, -0.05F * width, -1}, 0);
@@ -4060,23 +4078,74 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
 				}
 			}
 
-			mu_layout_row(ctx, 3, (int[]) {0.65F * width, -0.05F * width, -1}, 0);
-			mu_layout_next(ctx);
+		}
 
-			if(mu_button(ctx, "Apply changes")) {
-				memcpy(&settings, &settings_tmp, sizeof(struct RENDER_OPTIONS));
-				window_fromsettings();
-				sound_volume(settings.volume / 10.0F);
-				config_save();
+		if(mu_header_ex(ctx, "All settings", MU_OPT_EXPANDED)) {
+			int width = mu_get_current_container(ctx)->body.w;
+
+			for(int k = 0; k < list_size(&config_settings); k++) {
+				struct config_setting* a = list_get(&config_settings, k);
+
+				if(strcmp(a->category, "KyroSpades Settings") == 0 || strcmp(a->category, "Weapon Settings") == 0 || strcmp(a->category, "Spectator Mode Settings") == 0 || strcmp(a->category, "Weather") == 0 || strcmp(a->category, "Graphic Settings") == 0)
+					continue;
+
+				mu_layout_row(ctx, 3, (int[]) {0.65F * width, -0.05F * width, -1}, 0);
+
+				switch(a->type) {
+					case CONFIG_TYPE_STRING:
+						mu_text(ctx, a->name);
+						mu_textbox(ctx, a->value, a->max + 1);
+						break;
+					case CONFIG_TYPE_INT:
+						if(a->max == 1 && a->min == 0) {
+							mu_text(ctx, a->name);
+							mu_checkbox(ctx, "", a->value);
+						} else if(a->defaults_length > 0) {
+							mu_text(ctx, a->name);
+							int_slider_defaults(ctx, a);
+						} else if(a->max == INT_MAX) {
+							mu_text(ctx, a->name);
+							int_number(ctx, a->value);
+						} else {
+							mu_text(ctx, a->name);
+							int_slider(ctx, a->value, a->min, a->max);
+						}
+						break;
+					case CONFIG_TYPE_FLOAT:
+						mu_text(ctx, a->name);
+						if(a->max == INT_MAX) {
+							mu_number(ctx, a->value, 0.1F);
+							*(float*)a->value = max(a->min, *(float*)a->value);
+						} else {
+							mu_slider(ctx, a->value, a->min, a->max);
+						}
+						break;
+				}
+
+				if(*a->help) {
+					mu_push_id(ctx, &a->value, sizeof(a->value));
+					if(mu_begin_popup(ctx, "Help")) {
+						mu_layout_row(ctx, 1, (int[]) {ctx->text_width(ctx->style->font, a->help, 0)}, 0);
+						mu_text(ctx, a->help);
+						mu_end_popup(ctx);
+					}
+
+					if(mu_button(ctx, "?"))
+						mu_open_popup(ctx, "Help");
+					mu_pop_id(ctx);
+				} else {
+					mu_layout_next(ctx);
+				}
 			}
+
+			hud_settings_autoapply();
 		}
 
 		if(mu_header_ex(ctx, "Help", MU_OPT_EXPANDED)) {
 			mu_layout_row(ctx, 1, (int[]) {-1}, -1);
 			mu_text(ctx,
 					"To edit a value directly, [SHIFT]+LMB on its container to change it using the keyboard. You can "
-					"also drag on a container to modify its value relative to its current one.\n\nWhen finished click "
-					"[Apply changes] so that your settings are not lost.");
+					"also drag on a container to modify its value relative to its current one.");
 		}
 
 		mu_end_panel(ctx);

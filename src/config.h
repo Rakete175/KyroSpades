@@ -90,6 +90,10 @@ extern struct RENDER_OPTIONS {
 	int rain;
 	int snow;
 	int rain_snow_3d;
+	float exposure;
+	float saturation;
+	float contrast;
+	float vignette;
 } settings, settings_tmp;
 
 extern struct list config_keys;
