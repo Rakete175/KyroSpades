@@ -320,9 +320,6 @@ void config_save() {
 	config_seti("client", "rain", settings.rain);
 	config_seti("client", "snow", settings.snow);
 	config_seti("client", "rain_snow_3d", settings.rain_snow_3d);
-	config_setf("client", "exposure", settings.exposure);
-	config_setf("client", "saturation", settings.saturation);
-	config_setf("client", "contrast", settings.contrast);
 	config_setf("client", "rifle_ads_fov", settings.rifle_ads_fov);
 	config_setf("client", "shotgun_ads_fov", settings.shotgun_ads_fov);
 	config_setf("client", "smg_ads_fov", settings.smg_ads_fov);
@@ -412,9 +409,6 @@ static int config_read_key(void* user, const char* section, const char* name, co
 		IMPORT_SETTING(settings.rain, rain, atoi(value));
 		IMPORT_SETTING(settings.snow, snow, atoi(value));
 		IMPORT_SETTING(settings.rain_snow_3d, rain_snow_3d, atoi(value));
-		IMPORT_SETTING(settings.exposure, exposure, fmaxf(-100.0F, fminf(atof(value), 100.0F)));
-		IMPORT_SETTING(settings.saturation, saturation, fmaxf(-100.0F, fminf(atof(value), 100.0F)));
-		IMPORT_SETTING(settings.contrast, contrast, fmaxf(-100.0F, fminf(atof(value), 100.0F)));
 		IMPORT_SETTING(settings.rifle_ads_fov, rifle_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
 		IMPORT_SETTING(settings.shotgun_ads_fov, shotgun_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
 		IMPORT_SETTING(settings.smg_ads_fov, smg_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
@@ -780,6 +774,14 @@ void config_reload() {
 				 .min = 0,
 				 .max = INT_MAX,
 				 .name = "V-Sync",
+				 .help = "Limits your game's fps",
+				 .defaults = 0,
+				 1,
+				 60,
+				 120,
+				 144,
+				 240,
+				 .defaults_length = 6,
 				 .label_callback = config_label_vsync,
 				 .category = "Graphic Settings",
 			 });

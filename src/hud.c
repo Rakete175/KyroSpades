@@ -1597,12 +1597,13 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 
 			int* pick_pos = camera_terrain_pick(1);
 			if(pick_pos) {
-				float dx = (pick_pos[0] + 0.5F) - camera_x;
-				float dy = (pick_pos[1] + 0.5F) - camera_y;
-				float dz = (pick_pos[2] + 0.5F) - camera_z;
-				sprintf(line, "Distance: %.1f", sqrt(dx * dx + dy * dy + dz * dz));
+				double dx = pick_pos[0] - camera_x;
+				double dy = pick_pos[1] - camera_y;
+				double dz = pick_pos[2] - camera_z;
+				double dist = sqrt(dx*dx + dy*dy + dz*dz);
+				sprintf(line, "Dist: %.0f", dist);
 			} else {
-				sprintf(line, "Distance: --");
+				sprintf(line, "Dist: --");
 			}
 			hud_font_render(x, y + h * 4, h, line, 1.F);
 
@@ -3708,13 +3709,6 @@ static void hud_settings_init() {
 	memcpy(&settings_tmp, &settings, sizeof(struct RENDER_OPTIONS));
 }
 
-static void hud_settings_autoapply() {
-	memcpy(&settings, &settings_tmp, sizeof(struct RENDER_OPTIONS));
-	window_fromsettings();
-	sound_volume(settings.volume / 10.0F);
-	config_save();
-}
-
 static int int_slider_defaults(mu_Context* ctx, struct config_setting* setting) {
 	int k = setting->defaults_length - 1;
 	while(k > 0 && setting->defaults[k] > *(int*)setting->value)
@@ -4138,19 +4132,26 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
 				}
 			}
 
-			hud_settings_autoapply();
 		}
 
 		if(mu_header_ex(ctx, "Help", MU_OPT_EXPANDED)) {
 			mu_layout_row(ctx, 1, (int[]) {-1}, -1);
 			mu_text(ctx,
 					"To edit a value directly, [SHIFT]+LMB on its container to change it using the keyboard. You can "
-					"also drag on a container to modify its value relative to its current one.");
+					"also drag on a container to modify its value relative to its current one.\n\n"
+					"Settings are auto-applied when changed.");
 		}
 
 		mu_end_panel(ctx);
 
 		mu_end_window(ctx);
+	}
+
+	if(memcmp(&settings, &settings_tmp, sizeof(struct RENDER_OPTIONS)) != 0) {
+		memcpy(&settings, &settings_tmp, sizeof(struct RENDER_OPTIONS));
+		window_fromsettings();
+		sound_volume(settings.volume / 10.0F);
+		config_save();
 	}
 }
 
