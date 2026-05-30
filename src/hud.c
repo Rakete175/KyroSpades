@@ -757,6 +757,18 @@ static inline void hud_font_render(float x, float y, float h, char* text, float 
 	}
 }
 
+static inline void hud_font_render_outlined(float x, float y, float h, char* text, float a) {
+	float color[4];
+	glGetFloatv(GL_CURRENT_COLOR, color);
+	glColor4f(0.F, 0.F, 0.F, a);
+	font_render(x - 1.F, y, h, text);
+	font_render(x + 1.F, y, h, text);
+	font_render(x, y - 1.F, h, text);
+	font_render(x, y + 1.F, h, text);
+	glColor4f(color[0], color[1], color[2], color[3]);
+	font_render(x, y, h, text);
+}
+
 static inline void hud_font_render_centered(float x, float y, float h, char* text, float a) {
 	if(settings.hud_shadows) {
 		font_centered_shadow(x, y, h, text, a);
@@ -1542,27 +1554,27 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 			glColor3ub(team->red, team->green, team->blue);
 			format_comma(num_buf, player_stats_blocks_placed);
 			sprintf(line, "Blocks Placed: %s", num_buf);
-			hud_font_render(x, y, h, line, 1.F);
+			hud_font_render_outlined(x, y, h, line, 1.F);
 
 			format_comma(num_buf, player_stats_kills);
 			sprintf(line, "Kills: %s", num_buf);
-			hud_font_render(x, y + h, h, line, 1.F);
+			hud_font_render_outlined(x, y + h, h, line, 1.F);
 
 			format_comma(num_buf, player_stats_headshots);
 			sprintf(line, "Headshot Kills: %s", num_buf);
-			hud_font_render(x, y + h * 2, h, line, 1.F);
+			hud_font_render_outlined(x, y + h * 2, h, line, 1.F);
 
 			format_comma(num_buf, player_stats_deaths);
 			sprintf(line, "Deaths: %s", num_buf);
-			hud_font_render(x, y + h * 3, h, line, 1.F);
+			hud_font_render_outlined(x, y + h * 3, h, line, 1.F);
 
 			format_comma(num_buf, (int)player_stats_distance);
 			sprintf(line, "Distance Traveled: %s blocks", num_buf);
-			hud_font_render(x, y + h * 4, h, line, 1.F);
+			hud_font_render_outlined(x, y + h * 4, h, line, 1.F);
 
 			format_comma(num_buf, player_stats_jumps);
 			sprintf(line, "Jumps: %s", num_buf);
-			hud_font_render(x, y + h * 5, h, line, 1.F);
+			hud_font_render_outlined(x, y + h * 5, h, line, 1.F);
 
 			font_select(FONT_FIXEDSYS);
 		}
@@ -1572,7 +1584,7 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 			font_select(FONT_FIXEDSYS);
 			struct Team* team = players[local_player_id].team == TEAM_1
 				? &gamestate.team_1 : &gamestate.team_2;
-			float x = settings.window_width - 8.F - font_length(16.F, "New Parts/s: 9,999,999");
+			float right_edge = settings.window_width - 8.F;
 			float y = settings.window_height / 2.F - 44.F;
 			float h = 16.F;
 			char line[64];
@@ -1581,19 +1593,19 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 			glColor3ub(team->red, team->green, team->blue);
 			format_comma(num_buf, particle_stats_count);
 			sprintf(line, "Particles: %s", num_buf);
-			hud_font_render(x, y, h, line, 1.F);
+			hud_font_render_outlined(right_edge - font_length(h, line), y, h, line, 1.F);
 
 			format_comma(num_buf, (int)particle_stats_created_per_second);
 			sprintf(line, "New Parts/s: %s", num_buf);
-			hud_font_render(x, y + h, h, line, 1.F);
+			hud_font_render_outlined(right_edge - font_length(h, line), y + h, h, line, 1.F);
 
 			format_comma(num_buf, particle_stats_vertices);
 			sprintf(line, "Vertices: %s", num_buf);
-			hud_font_render(x, y + h * 2, h, line, 1.F);
+			hud_font_render_outlined(right_edge - font_length(h, line), y + h * 2, h, line, 1.F);
 
 			format_comma(num_buf, model_total_voxels() + map_total_blocks());
 			sprintf(line, "Voxels: %s", num_buf);
-			hud_font_render(x, y + h * 3, h, line, 1.F);
+			hud_font_render_outlined(right_edge - font_length(h, line), y + h * 3, h, line, 1.F);
 
 			int* pick_pos = camera_terrain_pick(1);
 			if(pick_pos) {
@@ -1605,7 +1617,7 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 			} else {
 				sprintf(line, "Dist: --");
 			}
-			hud_font_render(x, y + h * 4, h, line, 1.F);
+			hud_font_render_outlined(right_edge - font_length(h, line), y + h * 4, h, line, 1.F);
 
 			font_select(FONT_FIXEDSYS);
 		}
@@ -2048,6 +2060,25 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 			font_centered(settings.window_width / 2.F, settings.window_height / 2.0F, 32.F, chat_popup);
 		}
 		glColor3f(1.0F, 1.0F, 1.0F);
+
+		if(local_player_drag_active && local_player_drag_amount > 0) {
+			char drag_str[16];
+			font_select(FONT_FIXEDSYS);
+			sprintf(drag_str, "%i", local_player_drag_amount);
+			float cx = settings.window_width / 2.0F;
+			float cy = 50.F;
+			float tw = font_length(32.F, drag_str);
+			float sx = cx - tw / 2.0F;
+			glColor4f(0.F, 0.F, 0.F, 1.F);
+			font_render(sx - 1.F, cy, 32.F, drag_str);
+			font_render(sx + 1.F, cy, 32.F, drag_str);
+			font_render(sx, cy - 1.F, 32.F, drag_str);
+			font_render(sx, cy + 1.F, 32.F, drag_str);
+			glColor3ub(players[local_player_id].block.red,
+					   players[local_player_id].block.green,
+					   players[local_player_id].block.blue);
+			font_render(sx, cy, 32.F, drag_str);
+		}
 	}
 
 	if(settings.show_fps) {

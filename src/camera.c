@@ -55,7 +55,7 @@ float camera_fov_scaled(float dt) {
 	// Calculate target FOV offset based on sprint and crouch state
 	// Only apply FOV changes when in first-person view as the local player
 	float target_fov_offset = 0.0F;
-	if(camera_mode == CAMERAMODE_FPS && local_id >= 0 && local_id < PLAYERS_MAX && players[local_id].alive) {
+	if(!settings.disable_dynamic_fov && camera_mode == CAMERAMODE_FPS && local_id >= 0 && local_id < PLAYERS_MAX && players[local_id].alive) {
 		if(players[local_id].input.keys.sprint) {
 			target_fov_offset += 20.0F;
 		}

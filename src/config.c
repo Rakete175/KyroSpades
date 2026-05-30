@@ -323,6 +323,7 @@ void config_save() {
 	config_setf("client", "rifle_ads_fov", settings.rifle_ads_fov);
 	config_setf("client", "shotgun_ads_fov", settings.shotgun_ads_fov);
 	config_setf("client", "smg_ads_fov", settings.smg_ads_fov);
+	config_seti("client", "disable_dynamic_fov", settings.disable_dynamic_fov);
 
 	config_sets("meta", "backend", CONFIG_BACKEND);
 
@@ -412,6 +413,7 @@ static int config_read_key(void* user, const char* section, const char* name, co
 		IMPORT_SETTING(settings.rifle_ads_fov, rifle_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
 		IMPORT_SETTING(settings.shotgun_ads_fov, shotgun_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
 		IMPORT_SETTING(settings.smg_ads_fov, smg_ads_fov, fmaxf(5.0F, fminf(atof(value), CAMERA_DEFAULT_FOV)));
+		IMPORT_SETTING(settings.disable_dynamic_fov, disable_dynamic_fov, atoi(value));
 	}
 	if(!strcmp(section, "meta")) {
 		if(!strcmp(name, "backend")) {
@@ -1183,8 +1185,19 @@ void config_reload() {
 				 .type = CONFIG_TYPE_INT,
 				 .min = 0,
 				 .max = 1,
-				 .help = "Displays technical statistics (particles, vertices)",
+			 .help = "Displays technical statistics (particles, vertices)",
 				 .name = "Technical stats display",
+				 .category = "KyroSpades Settings",
+		 });
+
+	list_add(&config_settings,
+			 &(struct config_setting) {
+				 .value = &settings_tmp.disable_dynamic_fov,
+				 .type = CONFIG_TYPE_INT,
+				 .min = 0,
+				 .max = 1,
+				 .help = "Disable FOV changes on sprint/crouch and makes crouch instant",
+				 .name = "Disable Dynamic FOV",
 				 .category = "KyroSpades Settings",
 			 });
 

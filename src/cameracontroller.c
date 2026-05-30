@@ -133,9 +133,13 @@ void cameracontroller_fps(float dt) {
 			target_crouch_offset = 0.0F;
 		}
 		
-		// Quick smooth crouch transition (~100ms)
-		float crouch_lerp_speed = 40.0F * dt;
-		crouch_offset = crouch_offset + (target_crouch_offset - crouch_offset) * fminf(crouch_lerp_speed, 1.0F);
+		if(settings.disable_dynamic_fov) {
+			crouch_offset = target_crouch_offset;
+		} else {
+			// Quick smooth crouch transition (~100ms)
+			float crouch_lerp_speed = 40.0F * dt;
+			crouch_offset = crouch_offset + (target_crouch_offset - crouch_offset) * fminf(crouch_lerp_speed, 1.0F);
+		}
 		
 		// Apply smooth crouch offset to player position and eye
 		if(window_key_down(WINDOW_KEY_CROUCH)) {

@@ -69,6 +69,7 @@ extern char local_player_drag_active;
 extern int local_player_drag_x;
 extern int local_player_drag_y;
 extern int local_player_drag_z;
+extern int local_player_drag_amount;
 
 /* Pending block placement when airborne */
 extern char local_player_pending_block_active;
@@ -120,7 +121,7 @@ extern struct Player {
 	unsigned int score;
 	unsigned char team, weapon, held_item;
 	unsigned char alive, connected;
-	float item_showup, item_disabled, items_show_start;
+	float item_showup, item_disabled, items_show_start, weapon_last_shot;
 	unsigned char items_show;
 	union {
 		unsigned int packed;

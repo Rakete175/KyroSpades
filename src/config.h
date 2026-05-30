@@ -94,6 +94,7 @@ extern struct RENDER_OPTIONS {
 	float saturation;
 	float contrast;
 	float vignette;
+	int disable_dynamic_fov;
 } settings, settings_tmp;
 
 extern struct list config_keys;

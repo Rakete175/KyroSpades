@@ -420,6 +420,7 @@ void read_PacketExistingPlayer(void* data, int len) {
 		players[p->player_id].team = p->team;
 		players[p->player_id].weapon = p->weapon;
 		players[p->player_id].held_item = p->held_item;
+		player_on_held_item_change(&players[p->player_id]);
 		players[p->player_id].score = p->kills;
 		players[p->player_id].block.red = p->red;
 		players[p->player_id].block.green = p->green;
@@ -440,6 +441,7 @@ void read_PacketCreatePlayer(void* data, int len) {
 		players[p->player_id].alive = 1;
 		players[p->player_id].team = p->team;
 		players[p->player_id].held_item = TOOL_GUN;
+		player_on_held_item_change(&players[p->player_id]);
 		players[p->player_id].weapon = p->weapon;
 		players[p->player_id].pos.x = p->x;
 		players[p->player_id].pos.y = 63.0F - p->z;
@@ -563,7 +565,7 @@ void read_PacketWorldUpdate(void* data, int len) {
 						= (struct PacketWorldUpdate076*)(data + k * sizeof(struct PacketWorldUpdate076));
 					if(players[p->player_id].connected && players[p->player_id].alive
 					   && p->player_id != local_player_id) {
-						if(distance3D(players[k].pos.x, players[k].pos.y, players[k].pos.z, p->x, 63.0F - p->z, p->y)
+						if(distance3D(players[p->player_id].pos.x, players[p->player_id].pos.y, players[p->player_id].pos.z, p->x, 63.0F - p->z, p->y)
 						   > 0.1F * 0.1F) {
 							players[p->player_id].pos.x = p->x;
 							players[p->player_id].pos.y = 63.0F - p->z;
@@ -617,8 +619,10 @@ void read_PacketWeaponInput(void* data, int len) {
 	if(p->player_id < PLAYERS_MAX && p->player_id != local_player_id) {
 		players[p->player_id].input.buttons.lmb = p->primary;
 		players[p->player_id].input.buttons.rmb = p->secondary;
-		if(p->primary)
+		if(p->primary) {
 			players[p->player_id].input.buttons.lmb_start = window_time();
+			players[p->player_id].weapon_last_shot = window_time();
+		}
 		if(p->secondary)
 			players[p->player_id].input.buttons.rmb_start = window_time();
 	}
@@ -628,6 +632,7 @@ void read_PacketSetTool(void* data, int len) {
 	struct PacketSetTool* p = (struct PacketSetTool*)data;
 	if(p->player_id < PLAYERS_MAX && p->tool < 4) {
 		players[p->player_id].held_item = p->tool;
+		player_on_held_item_change(&players[p->player_id]);
 	}
 }
 
@@ -1163,6 +1168,7 @@ int network_connect_string(char* addr) {
 int network_update() {
 	if(demo_is_playing()) {
 		demo_playback_update();
+		chunk_queue_blocks();
 		return 1;
 	}
 	if(network_connected) {

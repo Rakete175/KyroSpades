@@ -446,6 +446,7 @@ void display() {
 				}
 			}
 
+			local_player_drag_amount = 0;
 			int* pos = NULL;
 			switch(players[local_id].held_item) {
 				case TOOL_BLOCK:
@@ -472,6 +473,7 @@ void display() {
 				   && players[local_player_id].held_item == TOOL_BLOCK) {
 					amount = map_cube_line(local_player_drag_x, local_player_drag_z, 63 - local_player_drag_y, pos[0],
 										   pos[2], 63 - pos[1], cubes);
+					local_player_drag_amount = amount;
 				} else {
 					amount = 1;
 					cubes[0].x = pos[0];
@@ -1052,6 +1054,7 @@ int main(int argc, char** argv) {
 	settings.rifle_ads_fov = CAMERA_DEFAULT_FOV;
 	settings.shotgun_ads_fov = CAMERA_DEFAULT_FOV;
 	settings.smg_ads_fov = CAMERA_DEFAULT_FOV;
+	settings.disable_dynamic_fov = 0;
 	strcpy(settings.name, "DEV_CLIENT");
 
 #ifdef USE_TOUCH

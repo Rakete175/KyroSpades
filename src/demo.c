@@ -169,7 +169,7 @@ extern void (*packets[256])(void* data, int len);
 
 bool demo_is_playing(void)  { return DemoPlaybackState.active; }
 bool demo_is_seeking(void)  { return demo_seeking; }
-bool demo_mute_effects(void) { return demo_seeking; }
+bool demo_mute_effects(void) { return demo_seeking || demo_muting; }
 
 /* ── Game clock ───────────────────────────────────────────────────────
    Monotonic clock that equals window_time() during normal play but STOPS
@@ -536,8 +536,8 @@ void demo_playback_seek(float time) {
     if (backward) {
         float replay_time = (time < DemoPlaybackState.bootstrap_end_time)
                           ? DemoPlaybackState.bootstrap_end_time : time;
-        int from = demo_reset_world(time); /* restores the map active at `time` */
-        demo_fast_replay_to(from, replay_time);
+        demo_reset_world(time); /* restores the map active at `time` */
+        demo_fast_replay_to(0, replay_time);
     } else if (!backward) {
         /* Forward: fast-dispatch the in-between packets exactly as
            demo_playback_update would, just with effects muted.  Map packets

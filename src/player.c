@@ -114,6 +114,7 @@ char local_player_drag_active = 0;
 int local_player_drag_x;
 int local_player_drag_y;
 int local_player_drag_z;
+int local_player_drag_amount = 0;
 
 /* Pending block placement when airborne */
 char local_player_pending_block_active = 0;
@@ -144,6 +145,8 @@ void player_reset(struct Player* p) {
 	p->connected = 0;
 	p->alive = 0;
 	p->held_item = TOOL_GUN;
+	p->weapon = 0;
+	p->weapon_last_shot = 0;
 	p->block.red = 111;
 	p->block.green = 111;
 	p->block.blue = 111;
@@ -247,42 +250,39 @@ float* player_tool_func(const struct Player* p) {
 float* player_tool_translate_func(struct Player* p) {
 	static float ret[3];
 	ret[0] = ret[1] = ret[2] = 0.0F;
-	if(p == &players[local_player_id] && camera_mode == CAMERAMODE_FPS) {
-		if(game_time() - p->item_showup < 0.5F) {
-			return ret;
-		}
-		if(p->held_item == TOOL_GUN
-		   && game_time() - weapon_last_shot < weapon_delay(players[local_player_id].weapon)) {
-			ret[2] = -(weapon_delay(players[local_player_id].weapon) - (game_time() - weapon_last_shot))
-				/ weapon_delay(players[local_player_id].weapon) * weapon_recoil_anim(players[local_player_id].weapon)
-				* (local_player_ammo > 0);
-			return ret;
-		}
+	if(game_time() - p->item_showup < 0.5F) {
+		return ret;
+	}
+	if(p->held_item == TOOL_GUN
+	   && game_time() - p->weapon_last_shot < weapon_delay(p->weapon)) {
+		ret[2] = -(weapon_delay(p->weapon) - (game_time() - p->weapon_last_shot))
+			/ weapon_delay(p->weapon) * weapon_recoil_anim(p->weapon);
+		return ret;
+	}
 
-		if(p->held_item == TOOL_SPADE) {
-			float t = game_time() - p->spade_use_timer;
-			if(t > 1.0F) {
+	if(p->held_item == TOOL_SPADE) {
+		float t = game_time() - p->spade_use_timer;
+		if(t > 1.0F) {
+			return ret;
+		}
+		if(p->spade_use_type == 2) {
+			if(t > 0.4F && t <= 0.7F) {
+				ret[2] = (t - 0.4F) / 0.3F * 0.8F;
 				return ret;
 			}
-			if(p->spade_use_type == 2) {
-				if(t > 0.4F && t <= 0.7F) {
-					ret[2] = (t - 0.4F) / 0.3F * 0.8F;
-					return ret;
-				}
-				if(t > 0.7F) {
-					ret[2] = (0.3F - (t - 0.7F)) / 0.3F * 0.8F;
-					return ret;
-				}
+			if(t > 0.7F) {
+				ret[2] = (0.3F - (t - 0.7F)) / 0.3F * 0.8F;
+				return ret;
 			}
 		}
-		if(p->held_item == TOOL_GRENADE) {
-			if(p->input.buttons.lmb) {
-				ret[1] = (game_time() - p->input.buttons.lmb_start) * 1.3F;
-				ret[0] = -ret[1];
-				return ret;
-			} else {
-				return ret;
-			}
+	}
+	if(p->held_item == TOOL_GRENADE) {
+		if(p->input.buttons.lmb) {
+			ret[1] = (game_time() - p->input.buttons.lmb_start) * 1.3F;
+			ret[0] = -ret[1];
+			return ret;
+		} else {
+			return ret;
 		}
 	}
 	return ret;
