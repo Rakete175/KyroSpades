@@ -593,7 +593,6 @@ void display() {
 
 			matrix_upload();
 			map_collapsing_render();
-			matrix_upload();
 
 			if(!map_isair(camera_x, camera_y, camera_z))
 				glClear(GL_COLOR_BUFFER_BIT);

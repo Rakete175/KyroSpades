@@ -658,3 +658,32 @@ void kv6_render(struct kv6_t* kv6, unsigned char team) {
 		}
 	}
 }
+
+void kv6_emit_to_tesselator(struct kv6_t* kv6, struct tesselator* tess) {
+	if(!kv6 || !kv6->voxels || !tess) return;
+
+	for(int i = 0; i < kv6->voxel_count; i++) {
+		int r = blue(kv6->voxels[i].color);
+		int g = green(kv6->voxels[i].color);
+		int b = red(kv6->voxels[i].color);
+
+		if((r | g | b) == 0)
+			continue;
+
+		vec4 v = {
+			(kv6->voxels[i].x - kv6->xpiv) * kv6->scale,
+			(kv6->voxels[i].z - kv6->zpiv) * kv6->scale,
+			(kv6->voxels[i].y - kv6->ypiv) * kv6->scale,
+			1.0F};
+		matrix_vector(matrix_model, v);
+
+		tesselator_set_color(tess, rgba(r, g, b, 255));
+		float hs = kv6->scale * 0.5F;
+		tesselator_addf_cube_face(tess, CUBE_FACE_X_N, v[0] - hs, v[1] - hs, v[2] - hs, kv6->scale);
+		tesselator_addf_cube_face(tess, CUBE_FACE_X_P, v[0] - hs, v[1] - hs, v[2] - hs, kv6->scale);
+		tesselator_addf_cube_face(tess, CUBE_FACE_Y_N, v[0] - hs, v[1] - hs, v[2] - hs, kv6->scale);
+		tesselator_addf_cube_face(tess, CUBE_FACE_Y_P, v[0] - hs, v[1] - hs, v[2] - hs, kv6->scale);
+		tesselator_addf_cube_face(tess, CUBE_FACE_Z_N, v[0] - hs, v[1] - hs, v[2] - hs, kv6->scale);
+		tesselator_addf_cube_face(tess, CUBE_FACE_Z_P, v[0] - hs, v[1] - hs, v[2] - hs, kv6->scale);
+	}
+}

@@ -41,12 +41,14 @@ void entitysys_iterate(struct entity_system* es, void* user, bool (*callback)(vo
 	pthread_mutex_lock(&es->lock);
 
 	uint8_t* obj = es->buffer;
-	for(size_t k = 0; k < es->count; k++, obj += es->object_size) {
+	for(size_t k = 0; k < es->count; ) {
 		if(callback(obj, user)) {
-			if(es->count > 1)
-				memcpy(obj, (uint8_t*)es->buffer + es->object_size * (es->count - 1), es->object_size);
-
 			es->count--;
+			if(es->count > 0 && k < es->count)
+				memcpy(obj, (uint8_t*)es->buffer + es->object_size * es->count, es->object_size);
+		} else {
+			k++;
+			obj += es->object_size;
 		}
 	}
 
