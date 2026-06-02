@@ -185,7 +185,7 @@ void* chunk_generate(void* data) {
 		struct chunk_result_packet result;
 		result.chunk = work.chunk;
 		result.minimap_data = malloc(CHUNK_SIZE * CHUNK_SIZE * sizeof(uint32_t));
-		tesselator_create(&result.tesselator, VERTEX_INT, 0);
+		tesselator_create(&result.tesselator, VERTEX_INT, 0, settings.textured_blocks);
 
 		struct libvxl_chunk_copy blocks;
 		map_copy_blocks(&blocks, work.chunk_x * CHUNK_SIZE, work.chunk_y * CHUNK_SIZE);

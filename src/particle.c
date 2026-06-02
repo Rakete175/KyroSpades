@@ -40,16 +40,13 @@ struct tesselator particle_tesselator;
 static float rain_timer = 0.0F;
 static float snow_timer = 0.0F;
 
-static int rain_snow_count = 0;
-#define MAX_RAIN_SNOW 2000
-
 int particle_stats_count = 0;
 int particle_stats_total_created = 0;
 int particle_stats_vertices = 0;
 
 void particle_init() {
 	entitysys_create(&particles, sizeof(struct Particle), 256);
-	tesselator_create(&particle_tesselator, VERTEX_FLOAT, 0);
+	tesselator_create(&particle_tesselator, VERTEX_FLOAT, 0, 0);
 }
 
 static bool particle_update_single(void* obj, void* user) {
@@ -61,7 +58,6 @@ static bool particle_update_single(void* obj, void* user) {
 	float size = p->size * (1.0F - ((float)(window_time() - p->fade) / fade_time));
 
 	if(size < 0.01F) {
-		if(p->type == 253 || p->type == 254) rain_snow_count--;
 		return true;
 	} else {
 		float acc_y = -32.0F * dt;
@@ -176,10 +172,8 @@ static bool particle_render_single(void* obj, void* user) {
 			matrix_translate(matrix_model, p->x, p->y, p->z);
 			matrix_pointAt(matrix_model, p->ox, p->oy * max(1.0F - (window_time() - p->fade) / 0.5F, 0.0F), p->oz);
 			matrix_rotate(matrix_model, 90.0F, 0.0F, 1.0F, 0.0F);
-			matrix_translate(matrix_model, -casing->xpiv, -casing->zpiv, -casing->ypiv);
-			matrix_scale3(matrix_model, casing->scale);
 			matrix_upload();
-			kv6_emit_to_tesselator(casing, tess);
+			kv6_render(casing, TEAM_SPECTATOR);
 			matrix_pop(matrix_model);
 		}
 	}
@@ -262,12 +256,12 @@ void particle_create_rain(void) {
 	float player_y = local->pos.y;
 	float player_z = local->pos.z;
 
-	float rain_height = player_y + 40.0F;
-	float render_dist = settings.render_distance;
+	float rain_height = player_y + 40.0F; // Spawn twice as high (was 20.0F, now 40.0F)
+	float render_dist = sqrtf(settings.render_distance * settings.render_distance);
 
-	int particles_per_frame = 150;
+	int particles_per_frame = 450; // Doubled (was 225)
 
-	for(int i = 0; i < particles_per_frame && rain_snow_count < MAX_RAIN_SNOW; i++) {
+	for(int i = 0; i < particles_per_frame; i++) {
 		float offset_x = (((float)rand() / (float)RAND_MAX) * 2.0F - 1.0F) * render_dist;
 		float offset_z = (((float)rand() / (float)RAND_MAX) * 2.0F - 1.0F) * render_dist;
 
@@ -291,7 +285,6 @@ void particle_create_rain(void) {
 						  .color = rgba(0x00, 0x00, 0xCC, 0xFF),
 						  .type = 253,
 					  });
-		rain_snow_count++;
 		particle_stats_total_created++;
 	}
 }
@@ -319,12 +312,12 @@ void particle_create_snow(void) {
 		player_z = local->pos.z;
 	}
 
-	float snow_height = player_y + 40.0F;
-	float render_dist = settings.render_distance;
+	float snow_height = player_y + 40.0F; // Spawn twice as high (same as rain)
+	float render_dist = sqrtf(settings.render_distance * settings.render_distance);
 
-	int particles_per_frame = 75;
+	int particles_per_frame = 225; // Increased by 50% (was 150)
 
-	for(int i = 0; i < particles_per_frame && rain_snow_count < MAX_RAIN_SNOW; i++) {
+	for(int i = 0; i < particles_per_frame; i++) {
 		float offset_x = (((float)rand() / (float)RAND_MAX) * 2.0F - 1.0F) * render_dist;
 		float offset_z = (((float)rand() / (float)RAND_MAX) * 2.0F - 1.0F) * render_dist;
 
@@ -342,13 +335,12 @@ void particle_create_snow(void) {
 						  .y = snow_height,
 						  .z = spawn_z,
 						  .vx = 0.0F,
-						  .vy = -3.0F - ((float)rand() / (float)RAND_MAX) * 3.0F,
+						  .vy = -3.0F - ((float)rand() / (float)RAND_MAX) * 3.0F, // Tripled speed for snow
 						  .vz = 0.0F,
 						  .fade = window_time(),
-						  .color = rgba(0xFF, 0xFF, 0xFF, 0xFF),
-						  .type = 254,
+						  .color = rgba(0xFF, 0xFF, 0xFF, 0xFF), // White color for snow
+						  .type = 254, // Special type for snow (different fade time)
 					  });
-		rain_snow_count++;
 		particle_stats_total_created++;
 	}
 }

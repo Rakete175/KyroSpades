@@ -381,10 +381,7 @@ void display() {
 		camera_ExtractFrustum();
 
 		if(!network_map_transfer) {
-			if(network_connected)
-				glx_enable_sphericalfog();
-			else if(hud_active->render_world || camera_mode == CAMERAMODE_SPECTATOR || camera_mode == CAMERAMODE_BODYVIEW)
-				glx_enable_sphericalfog();
+			glx_enable_sphericalfog();
 			drawScene();
 
 			int render_fpv = (camera_mode == CAMERAMODE_FPS)
@@ -593,6 +590,7 @@ void display() {
 
 			matrix_upload();
 			map_collapsing_render();
+			matrix_upload();
 
 			if(!map_isair(camera_x, camera_y, camera_z))
 				glClear(GL_COLOR_BUFFER_BIT);

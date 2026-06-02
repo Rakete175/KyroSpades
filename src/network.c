@@ -947,22 +947,22 @@ void read_PacketVersionGet(void* data, int len) {
 	ver.revision = KYROSPADES_PATCH;
 #ifndef OPENGL_ES
 #ifdef OS_WINDOWS
-	char* os = "(Windows) " BS_VER_INFO;
+	char* os = "KyroSpades (Windows) " BS_VER_INFO;
 #endif
 #ifdef OS_LINUX
-	char* os = "(Linux) " BS_VER_INFO;
+	char* os = "KyroSpades (Linux) " BS_VER_INFO;
 #endif
 #ifdef OS_APPLE
-	char* os = "(Apple) " BS_VER_INFO;
+	char* os = "KyroSpades (Apple) " BS_VER_INFO;
 #endif
 #ifdef OS_HAIKU
-	char* os = "(Haiku) " BS_VER_INFO;
+	char* os = "KyroSpades (Haiku) " BS_VER_INFO;
 #endif
 #else
 #ifdef USE_TOUCH
-	char* os = "(Android) " BS_VER_INFO;
+	char* os = "KyroSpades (Android) " BS_VER_INFO;
 #else
-	char* os = "(Embedded) " BS_VER_INFO;
+	char* os = "KyroSpades (Embedded) " BS_VER_INFO;
 #endif
 #endif
 	strcpy(ver.operatingsystem, os);

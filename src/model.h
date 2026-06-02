@@ -80,7 +80,6 @@ void kv6_calclight(int x, int y, int z);
 void kv6_rebuild_complete(void);
 void kv6_rebuild(struct kv6_t* kv6);
 void kv6_render(struct kv6_t* kv6, unsigned char team);
-void kv6_emit_to_tesselator(struct kv6_t* kv6, struct tesselator* tess);
 void kv6_load(struct kv6_t* kv6, void* bytes, float scale);
 void kv6_init(void);
 int model_loaded_count(void);

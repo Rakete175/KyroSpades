@@ -221,13 +221,8 @@ static bool falling_blocks_meshing(void* key, void* value, void* user) {
 static bool falling_blocks_pivot(void* key, void* value, void* user) {
 	float* pivot = (float*)user;
 	uint32_t pos = *(uint32_t*)key;
-	uint32_t expected_color = *(uint32_t*)value;
 
-	// double-check: only remove if block still has the expected color
-	// (player may have modified it between BFS snapshot and this write-back)
-	if(map_get(pos_keyx(pos), pos_keyy(pos), pos_keyz(pos)) == expected_color)
-		map_set(pos_keyx(pos), pos_keyy(pos), pos_keyz(pos), 0xFFFFFFFF);
-
+	map_set(pos_keyx(pos), pos_keyy(pos), pos_keyz(pos), 0xFFFFFFFF);
 	pivot[0] += pos_keyx(pos);
 	pivot[1] += pos_keyy(pos);
 	pivot[2] += pos_keyz(pos);
@@ -237,39 +232,13 @@ static bool falling_blocks_pivot(void* key, void* value, void* user) {
 
 static const int DIRECTION_MASK[][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
 
-static inline bool snapshot_issolid(const size_t* geo, int x, int y, int z) {
-	size_t bit = (map_size_y - 1 - y) + (x + z * (size_t)map_size_x) * map_size_y;
-	return (geo[bit / (sizeof(size_t) * 8)] >> (bit % (sizeof(size_t) * 8))) & 1;
-}
-
-static bool fetch_colors(void* key, void* value, void* user) {
-	struct libvxl_map* m = (struct libvxl_map*)user;
-	uint32_t pos = *(uint32_t*)key;
-	int fx = pos_keyx(pos), fy = pos_keyy(pos), fz = pos_keyz(pos);
-	*(uint32_t*)value = rgb2bgr(libvxl_map_get(m, fx, fz, map_size_y - 1 - fy));
-	return true;
-}
-
 static bool map_update_physics_sub(struct map_collapsing* collapsing, int x, int y, int z) {
 	if(y <= 1)
 		return false;
 
-	// Phase 1: snapshot geometry bitmask under brief rdlock, then release
-	size_t geo_words = ((size_t)map_size_x * map_size_z * map_size_y + sizeof(size_t) * 8 - 1)
-		/ (sizeof(size_t) * 8);
-	size_t* local_geo = malloc(geo_words * sizeof(size_t));
-	if(!local_geo) return false;
-
-	pthread_rwlock_rdlock(&map_lock);
-	if(!libvxl_map_issolid(&map, x, z, map_size_y - 1 - y)) {
-		pthread_rwlock_unlock(&map_lock);
-		free(local_geo);
+	if(map_isair(x, y, z))
 		return false;
-	}
-	memcpy(local_geo, map.geometry, geo_words * sizeof(size_t));
-	pthread_rwlock_unlock(&map_lock);
 
-	// Phase 2: BFS on local snapshot — no lock held
 	struct minheap openlist;
 	minheap_create(&openlist);
 
@@ -282,43 +251,43 @@ static bool map_update_physics_sub(struct map_collapsing* collapsing, int x, int
 		.pos = pos_key(x, y, z),
 	};
 
-	minheap_put(&openlist, &start);
-	ht_insert(&closedlist, &start.pos, (uint32_t[]){0});
+	uint32_t start_color = map_get(x, y, z);
 
-	while(!minheap_isempty(&openlist)) {
+	minheap_put(&openlist, &start);
+	ht_insert(&closedlist, &start.pos, &start_color);
+
+	while(!minheap_isempty(&openlist)) { // find all connected blocks
 		struct minheap_block current = minheap_extract(&openlist);
 
-		if(pos_keyy(current.pos) <= 1) {
+		if(pos_keyy(current.pos) <= 1) { // stop at indestructible ground layer
 			minheap_destroy(&openlist);
 			ht_destroy(&closedlist);
-			free(local_geo);
 			return false;
 		}
 
 		for(size_t k = 0; k < sizeof(DIRECTION_MASK) / sizeof(*DIRECTION_MASK); k++) {
-			int dx = pos_keyx(current.pos) + DIRECTION_MASK[k][0];
-			int dy = pos_keyy(current.pos) + DIRECTION_MASK[k][1];
-			int dz = pos_keyz(current.pos) + DIRECTION_MASK[k][2];
+			int dir_block[3] = {
+				pos_keyx(current.pos) + DIRECTION_MASK[k][0],
+				pos_keyy(current.pos) + DIRECTION_MASK[k][1],
+				pos_keyz(current.pos) + DIRECTION_MASK[k][2],
+			};
 
-			if(dx >= 0 && dy >= 0 && dz >= 0 && dx < map_size_x
-			   && dy < map_size_y && dz < map_size_z
-			   && !ht_contains(&closedlist, (uint32_t[]){pos_key(dx, dy, dz)})
-			   && snapshot_issolid(local_geo, dx, dy, dz)) {
-				minheap_put(&openlist, &(struct minheap_block){.pos = pos_key(dx, dy, dz)});
-				ht_insert(&closedlist, (uint32_t[]){pos_key(dx, dy, dz)}, (uint32_t[]){0});
+			struct minheap_block block = (struct minheap_block) {
+				.pos = pos_key(dir_block[0], dir_block[1], dir_block[2]),
+			};
+
+			if(dir_block[0] >= 0 && dir_block[1] >= 0 && dir_block[2] >= 0 && dir_block[0] < map_size_x
+			   && dir_block[1] < map_size_y && dir_block[2] < map_size_z && !ht_contains(&closedlist, &block.pos)
+			   && !map_isair(dir_block[0], dir_block[1], dir_block[2])) {
+				minheap_put(&openlist, &block);
+				uint32_t color = map_get(dir_block[0], dir_block[1], dir_block[2]);
+				ht_insert(&closedlist, &block.pos, &color);
 			}
 		}
 	}
 
 	minheap_destroy(&openlist);
-	free(local_geo);
 
-	// Phase 3: fetch colors under brief rdlock
-	pthread_rwlock_rdlock(&map_lock);
-	ht_iterate(&closedlist, &map, fetch_colors);
-	pthread_rwlock_unlock(&map_lock);
-
-	// Phase 4: process results (write-back, meshing)
 	float pivot[3] = {0, 0, 0};
 	ht_iterate(&closedlist, pivot, falling_blocks_pivot);
 
@@ -334,7 +303,7 @@ static bool map_update_physics_sub(struct map_collapsing* collapsing, int x, int
 	collapsing->voxel_count = closedlist.size;
 	collapsing->has_displaylist = 0;
 
-	tesselator_create(&collapsing->mesh_geometry, VERTEX_FLOAT, 0);
+	tesselator_create(&collapsing->mesh_geometry, VERTEX_FLOAT, 0, 0);
 	ht_iterate(&collapsing->voxels, (void*[]) {collapsing, &collapsing->mesh_geometry}, falling_blocks_meshing);
 
 	return true;
@@ -522,7 +491,7 @@ void* falling_blocks_worker(void* user) {
 
 void map_init() {
 	libvxl_create(&map, 512, 512, 64, NULL, 0);
-	tesselator_create(&map_damaged_tesselator, VERTEX_INT, 0);
+	tesselator_create(&map_damaged_tesselator, VERTEX_INT, 0, 0);
 	pthread_rwlock_init(&map_lock, NULL);
 
 	ht_setup(&map_damaged_voxels, sizeof(uint32_t), sizeof(struct damaged_voxel), 16);

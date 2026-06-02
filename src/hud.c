@@ -780,31 +780,6 @@ static inline void hud_font_render_centered(float x, float y, float h, char* tex
 static int chat_messages = 16;
 static int chat_scroll_offset = 0;
 
-static char mention_cache_words[256] = "";
-static char mention_cache_tokens[32][64];
-static int mention_cache_count = 0;
-
-static void mention_cache_update(void) {
-	if(strcmp(mention_cache_words, settings.chat_mention_words) == 0)
-		return;
-	strncpy(mention_cache_words, settings.chat_mention_words, sizeof(mention_cache_words) - 1);
-	mention_cache_words[sizeof(mention_cache_words) - 1] = 0;
-	mention_cache_count = 0;
-	char tmp[256];
-	strncpy(tmp, mention_cache_words, sizeof(tmp) - 1);
-	tmp[sizeof(tmp) - 1] = 0;
-	char* tok = strtok(tmp, ", ");
-	while(tok && mention_cache_count < 32) {
-		char* dst = mention_cache_tokens[mention_cache_count];
-		int i;
-		for(i = 0; i < 63 && tok[i]; i++)
-			dst[i] = (tok[i] >= 'A' && tok[i] <= 'Z') ? (tok[i] + 32) : tok[i];
-		dst[i] = 0;
-		mention_cache_count++;
-		tok = strtok(NULL, ", ");
-	}
-}
-
 static void hud_render_message(unsigned int channel, unsigned int k) {
 char *c;
 float x, y;
@@ -833,24 +808,42 @@ x = 16.F;
 y = settings.window_height - 22.0F - 10.0F * k - k * 8.F;
 }
 
+// Check if this message contains any mention word
 int is_mentioned = 0;
 if(settings.chat_mention_words[0] != '\0' && channel == 0 && *chat[channel][idx] != '\0') {
-mention_cache_update();
-if(mention_cache_count > 0) {
 char msg_copy[256];
 strncpy(msg_copy, chat[channel][idx], 255);
 msg_copy[255] = '\0';
+
+// Convert message to lowercase for comparison
 for(char* p = msg_copy; *p; p++) {
 if(*p >= 'A' && *p <= 'Z') *p = *p + 32;
 }
-for(int m = 0; m < mention_cache_count; m++) {
-if(strstr(msg_copy, mention_cache_tokens[m]) != NULL) {
+
+// Parse mention words (comma or space separated)
+char mentions_copy[256];
+strncpy(mentions_copy, settings.chat_mention_words, 255);
+mentions_copy[255] = '\0';
+
+char* token = strtok(mentions_copy, ", ");
+while(token != NULL) {
+// Convert token to lowercase
+for(char* p = token; *p; p++) {
+if(*p >= 'A' && *p <= 'Z') *p = *p + 32;
+}
+
+// Skip empty tokens
+if(strlen(token) > 0) {
+// Check if token exists in message
+if(strstr(msg_copy, token) != NULL) {
 is_mentioned = 1;
 break;
 }
 }
+token = strtok(NULL, ", ");
 }
 }
+
 
 if(channel == 0 && *chat[channel][idx] != '\0') {
 if(is_mentioned) {

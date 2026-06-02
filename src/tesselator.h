@@ -43,12 +43,10 @@ struct tesselator {
 	uint32_t quad_count;
 	uint32_t quad_space;
 	int has_normal;
+	int has_texcoord;
 	uint32_t color;
 	int8_t normal[3];
 	enum tesselator_vertex_type vertex_type;
-	unsigned int vbo, vbo_colors, vbo_normals, vbo_texcoords;
-	int vbo_created;
-	size_t vbo_capacity;
 };
 
 enum tesselator_cube_face {
@@ -60,7 +58,7 @@ enum tesselator_cube_face {
 	CUBE_FACE_Z_P,
 };
 
-void tesselator_create(struct tesselator* t, enum tesselator_vertex_type type, int has_normal);
+void tesselator_create(struct tesselator* t, enum tesselator_vertex_type type, int has_normal, int has_texcoord);
 void tesselator_clear(struct tesselator* t);
 void tesselator_free(struct tesselator* t);
 void tesselator_draw(struct tesselator* t, int with_color);
@@ -77,7 +75,5 @@ void tesselator_addi_cube_face_adv(struct tesselator* t, enum tesselator_cube_fa
 								   int16_t z, int16_t sx, int16_t sy, int16_t sz);
 void tesselator_addf_cube_face(struct tesselator* t, enum tesselator_cube_face face, float x, float y, float z,
 							   float sz);
-void tesselator_addf_cube_face_adv(struct tesselator* t, enum tesselator_cube_face face, float x, float y, float z,
-								   float sx, float sy, float sz);
 
 #endif
