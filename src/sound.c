@@ -132,14 +132,15 @@ static void sound_createEx(enum sound_space option, struct Sound_wav* w, float x
 		if(w == &sound_rifle_shoot || w == &sound_smg_shoot || w == &sound_shotgun_shoot) {
 			// Random pitch variation between 0.9 and 1.1 (±10%)
 			pitch = 0.9F + (ms_rand() / 32767.0F) * 0.2F;
-			// Random gain variation between 0.85 and 1.0 (±7.5%)
-			gain = 0.85F + (ms_rand() / 32767.0F) * 0.15F;
+			// Higher source gain so gunfire carries across the map (like OpenSpades)
+			gain = 3.0F;
 		}
 		
 		alSourcef(s.openal_handle, AL_PITCH, pitch);
 		alSourcef(s.openal_handle, AL_GAIN, gain);
-		alSourcef(s.openal_handle, AL_REFERENCE_DISTANCE, s.local ? 0.0F : w->min * SOUND_SCALE);
-		alSourcef(s.openal_handle, AL_MAX_DISTANCE, s.local ? 2048.0F : w->max * SOUND_SCALE);
+		alSourcef(s.openal_handle, AL_REFERENCE_DISTANCE, s.local ? 0.0F : 15.0F);
+		alSourcef(s.openal_handle, AL_MAX_DISTANCE, s.local ? 2048.0F : 1e10F);
+		alSourcef(s.openal_handle, AL_ROLLOFF_FACTOR, s.local ? 0.0F : 1.0F);
 		alSource3f(s.openal_handle, AL_POSITION, s.local ? 0.0F : x * SOUND_SCALE, s.local ? 0.0F : y * SOUND_SCALE,
 				   s.local ? 0.0F : z * SOUND_SCALE);
 		alSource3f(s.openal_handle, AL_VELOCITY, s.local ? 0.0F : vx * SOUND_SCALE, s.local ? 0.0F : vy * SOUND_SCALE,
@@ -282,7 +283,7 @@ void sound_init() {
 		return;
 	}
 
-	alDistanceModel(AL_LINEAR_DISTANCE_CLAMPED);
+	alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED);
 
 	sound_volume(settings.volume / 10.0F);
 
