@@ -62,6 +62,9 @@ jobs:
           sed -i '1s/^/#include <sys\/stat.h>\n/' src/texture.c || true
           sed -i 's/if(entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {/struct stat st; char _stat_path[512]; snprintf(_stat_path, sizeof(_stat_path), "%s\/%s", bg_folder, entry->d_name); stat(_stat_path, \&st); if(S_ISREG(st.st_mode)) {/g' src/texture.c || true
           sed -i 's/mkdir(dir_path, 0755)/mkdir(dir_path)/' src/demo.c || true
+          # ← NEW: Add sys/stat.h for skins.c and replace d_type check
+          sed -i '1s/^/#include <sys\/stat.h>\n/' src/skins.c || true
+          sed -i 's/if(entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {/struct stat st; char _stat_path[512]; snprintf(_stat_path, sizeof(_stat_path), "kv6\/%s", entry->d_name); stat(_stat_path, \&st); if(S_ISREG(st.st_mode)) {/g' src/skins.c || true
 
       - name: Build (Windows)
         if: matrix.platform == 'windows'
