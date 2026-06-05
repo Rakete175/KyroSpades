@@ -149,6 +149,7 @@ int texture_create(struct texture* t, char* filename) {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 	glBindTexture(GL_TEXTURE_2D, 0);
+	return 1;
 }
 
 int texture_create_buffer(struct texture* t, int width, int height, unsigned char* buff, int new) {
@@ -166,6 +167,7 @@ int texture_create_buffer(struct texture* t, int width, int height, unsigned cha
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 	glBindTexture(GL_TEXTURE_2D, 0);
+	return 1;
 }
 
 void texture_delete(struct texture* t) {

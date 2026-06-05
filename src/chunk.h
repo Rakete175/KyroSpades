@@ -37,6 +37,7 @@ extern struct chunk {
 	int max_height;
 	bool updated;
 	bool created;
+	int gen;
 	int x, y;
 } chunks[CHUNKS_PER_DIM * CHUNKS_PER_DIM];
 

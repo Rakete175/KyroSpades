@@ -159,6 +159,8 @@ void chat_showpopup(const char* msg, float duration, int color) {
 }
 
 void drawScene() {
+	window_apply();
+
 	if(settings.ambient_occlusion) {
 		glShadeModel(GL_SMOOTH);
 	} else {
@@ -166,17 +168,25 @@ void drawScene() {
 	}
 
 	if(settings.textured_blocks) {
-		glEnable(GL_TEXTURE_2D);
-		glBindTexture(GL_TEXTURE_2D, texture_blocks.texture_id);
-		glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+#ifndef OPENGL_ES
+		if(glx_fog) {
+			glFogi(GL_FOG_MODE, GL_LINEAR);
+			glFogf(GL_FOG_START, 0.0F);
+			glFogf(GL_FOG_END, settings.render_distance);
+			glFogfv(GL_FOG_COLOR, fog_color);
+			glEnable(GL_FOG);
+		}
+#endif
 	}
 
 	matrix_upload();
 	chunk_draw_visible();
 
 	if(settings.textured_blocks) {
-		glDisable(GL_TEXTURE_2D);
-		glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+#ifndef OPENGL_ES
+		if(glx_fog)
+			glDisable(GL_FOG);
+#endif
 	}
 
 	if(settings.smooth_fog) {
@@ -189,16 +199,6 @@ void drawScene() {
 		glFogfv(GL_FOG_COLOR, fog_color);
 		glEnable(GL_FOG);
 	}
-
-#ifndef OPENGL_ES
-	if(glx_fog && settings.textured_blocks) {
-		glFogi(GL_FOG_MODE, GL_LINEAR);
-		glFogf(GL_FOG_START, 0.0F);
-		glFogf(GL_FOG_END, settings.render_distance);
-		glFogfv(GL_FOG_COLOR, fog_color);
-		glEnable(GL_FOG);
-	}
-#endif
 
 	glShadeModel(GL_FLAT);
 	kv6_calclight(-1, -1, -1);
@@ -363,6 +363,10 @@ void display() {
 
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+		float saved_render_distance = settings.render_distance;
+		if(camera_mode == CAMERAMODE_SPECTATOR)
+			settings.render_distance = settings.spectator_fog_distance;
+
 		if(settings.opengl14) {
 			matrix_identity(matrix_projection);
 			matrix_perspective(matrix_projection, camera_fov_scaled(dt_float),
@@ -384,6 +388,7 @@ void display() {
 		if(!network_map_transfer) {
 			glx_enable_sphericalfog();
 			drawScene();
+			settings.render_distance = saved_render_distance;
 
 			int render_fpv = (camera_mode == CAMERAMODE_FPS)
 				|| ((camera_mode == CAMERAMODE_BODYVIEW || camera_mode == CAMERAMODE_SPECTATOR)
@@ -803,9 +808,9 @@ void init() {
 	network_init();
 	ping_init();
 	kv6_init();
-	skins_init();
 	texture_init();
 	sound_init();
+	skins_init();
 	tracer_init();
 	hud_init();
 	chunk_init();
@@ -947,6 +952,11 @@ void keys(struct window_instance* window, int key, int scancode, int action, int
 			settings.fullscreen = 0;
 		}
 	}
+#else
+	if(key == WINDOW_KEY_FULLSCREEN && action == WINDOW_PRESS) {
+		settings.fullscreen = !settings.fullscreen;
+		window_fromsettings();
+	}
 #endif
 
 	if(key == WINDOW_KEY_SCREENSHOT && action == WINDOW_PRESS) { // take screenshot
@@ -1057,6 +1067,7 @@ int main(int argc, char** argv) {
 	settings.shadow_entities = 0;
 	settings.ambient_occlusion = 0;
 	settings.render_distance = 128.0F;
+	settings.spectator_fog_distance = 128.0F;
 	settings.window_width = 800;
 	settings.window_height = 600;
 	settings.player_arms = 0;
@@ -1114,6 +1125,7 @@ int main(int argc, char** argv) {
 
 	log_info("Game started!");
 
+	settings.iron_sight = 1;
 	config_reload();
 
 	window_init();

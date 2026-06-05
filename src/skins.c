@@ -15,10 +15,22 @@
 
 struct skin_category skin_categories[SKIN_CATEGORIES];
 
+static int entry_compare(const void* a, const void* b) {
+	const struct skin_entry* ea = (const struct skin_entry*)a;
+	const struct skin_entry* eb = (const struct skin_entry*)b;
+	return strcmp(ea->name, eb->name);
+}
+
 void skins_scan(void) {
 	for(int c = 0; c < SKIN_CATEGORIES; c++) {
 		struct skin_category* cat = &skin_categories[c];
-		cat->entries = NULL;
+
+		if(cat->entries) {
+			for(int i = 0; i < cat->count; i++)
+				free(cat->entries[i].previews);
+			free(cat->entries);
+			cat->entries = NULL;
+		}
 		cat->count = 0;
 
 		switch(c) {
@@ -137,10 +149,13 @@ void skins_scan(void) {
 			}
 		}
 		closedir(dir);
+
+		if(cat->count > 1)
+			qsort(cat->entries + 1, cat->count - 1, sizeof(struct skin_entry), entry_compare);
 	}
 }
 
-int skins_apply(enum skin_category_type category, int entry) {
+int skins_apply(enum skin_category_type category, int entry, int models) {
 	if(category < 0 || category >= SKIN_CATEGORIES)
 		return -1;
 	struct skin_category* cat = &skin_categories[category];
@@ -150,17 +165,19 @@ int skins_apply(enum skin_category_type category, int entry) {
 	struct skin_entry* e = &cat->entries[entry];
 	int ok = 0;
 
-	for(int m = 0; m < cat->model_count; m++) {
-		char path[256];
-		if(e->suffix[0])
-			snprintf(path, sizeof(path), "kv6/%s(%s).kv6",
-				cat->models[m].basename, e->suffix);
-		else
-			snprintf(path, sizeof(path), "kv6/%s.kv6",
-				cat->models[m].basename);
+	if(models) {
+		for(int m = 0; m < cat->model_count; m++) {
+			char path[256];
+			if(e->suffix[0])
+				snprintf(path, sizeof(path), "kv6/%s(%s).kv6",
+					cat->models[m].basename, e->suffix);
+			else
+				snprintf(path, sizeof(path), "kv6/%s.kv6",
+					cat->models[m].basename);
 
-		if(kv6_reload(cat->models[m].ptr, path, cat->models[m].scale) == 0)
-			ok = 1;
+			if(kv6_reload(cat->models[m].ptr, path, cat->models[m].scale) == 0)
+				ok = 1;
+		}
 	}
 
 	for(int s = 0; s < cat->sound_count; s++) {
@@ -204,8 +221,10 @@ int skins_apply(enum skin_category_type category, int entry) {
 		if(e->suffix[0]) {
 			snprintf(path, sizeof(path), "png/%s(%s).png",
 				cat->models[0].basename, e->suffix);
-			if(!file_exists(path))
+			if(!file_exists(path)) {
+				log_warn("Skin PNG not found: %s, falling back to default", path);
 				snprintf(path, sizeof(path), "%s", default_png);
+			}
 		} else {
 			snprintf(path, sizeof(path), "%s", default_png);
 		}
@@ -214,6 +233,17 @@ int skins_apply(enum skin_category_type category, int entry) {
 	}
 
 	return ok ? 0 : -1;
+}
+
+void skins_apply_all(int models) {
+	skins_apply(SKIN_SPADE, settings.skin_spade, models);
+	skins_apply(SKIN_GRENADE, settings.skin_grenade, models);
+	skins_apply(SKIN_RIFLE, settings.skin_rifle, models);
+	skins_apply(SKIN_SMG, settings.skin_smg, models);
+	skins_apply(SKIN_SHOTGUN, settings.skin_shotgun, models);
+	skins_apply(SKIN_PLAYER, settings.skin_player, models);
+	skins_apply(SKIN_INTEL, settings.skin_intel, models);
+	skins_apply(SKIN_TENT, settings.skin_tent, models);
 }
 
 void skins_render_preview(enum skin_category_type category, int entry, float cx, float cy, float size) {
@@ -284,12 +314,14 @@ void skins_render_preview(enum skin_category_type category, int entry, float cx,
 void skins_init(void) {
 	skins_scan();
 
-	skins_apply(SKIN_SPADE, settings.skin_spade);
-	skins_apply(SKIN_GRENADE, settings.skin_grenade);
-	skins_apply(SKIN_RIFLE, settings.skin_rifle);
-	skins_apply(SKIN_SMG, settings.skin_smg);
-	skins_apply(SKIN_SHOTGUN, settings.skin_shotgun);
-	skins_apply(SKIN_PLAYER, settings.skin_player);
-	skins_apply(SKIN_INTEL, settings.skin_intel);
-	skins_apply(SKIN_TENT, settings.skin_tent);
+	settings.skin_spade = max(0, min(settings.skin_spade, skin_categories[SKIN_SPADE].count - 1));
+	settings.skin_grenade = max(0, min(settings.skin_grenade, skin_categories[SKIN_GRENADE].count - 1));
+	settings.skin_rifle = max(0, min(settings.skin_rifle, skin_categories[SKIN_RIFLE].count - 1));
+	settings.skin_smg = max(0, min(settings.skin_smg, skin_categories[SKIN_SMG].count - 1));
+	settings.skin_shotgun = max(0, min(settings.skin_shotgun, skin_categories[SKIN_SHOTGUN].count - 1));
+	settings.skin_player = max(0, min(settings.skin_player, skin_categories[SKIN_PLAYER].count - 1));
+	settings.skin_intel = max(0, min(settings.skin_intel, skin_categories[SKIN_INTEL].count - 1));
+	settings.skin_tent = max(0, min(settings.skin_tent, skin_categories[SKIN_TENT].count - 1));
+
+	skins_apply_all(1);
 }

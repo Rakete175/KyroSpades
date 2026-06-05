@@ -72,6 +72,7 @@ static float player_stats_last_z = 0.0F;
 static float particle_stats_last_time = 0.0F;
 static int particle_stats_last_total = 0;
 static float particle_stats_created_per_second = 0.0F;
+static double spec_color_palette_time = 0.0;
 
 void player_stats_reset() {
 	player_stats_blocks_placed = 0;
@@ -1577,6 +1578,25 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 			}
 		}
 
+		if(camera_mode == CAMERAMODE_SPECTATOR && spec_color_palette_time > window_time()) {
+			unsigned int cur = rgb((int)(fog_color[0] * 255), (int)(fog_color[1] * 255),
+								   (int)(fog_color[2] * 255));
+			for(int y = 0; y < 8; y++) {
+				for(int x = 0; x < 8; x++) {
+					if(texture_block_color(x, y) == cur) {
+						unsigned char g = (((int)(window_time() * 4)) & 1) * 0xFF;
+						glColor3ub(g, g, g);
+						texture_draw_empty(settings.window_width + (x * 8 - 65 - 7), 48.F + (65 - y * 8),
+										   8, 8);
+						y = 10;
+						break;
+					}
+				}
+			}
+			glColor3f(1.0F, 1.0F, 1.0F);
+			texture_draw(&texture_color_selection, settings.window_width - 64 - 7, 48.F + 64, 64, 64);
+		}
+
 		if(settings.player_stats && network_connected && network_logged_in
 		   && players[local_player_id].team != TEAM_SPECTATOR) {
 			font_select(FONT_FIXEDSYS);
@@ -2691,11 +2711,54 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 						}
 					}
 				}
-				if(y < 10) {
-					players[local_player_id].block.packed = texture_block_color(3, 0);
-					network_updateColor();
+		if(y < 10) {
+				players[local_player_id].block.packed = texture_block_color(3, 0);
+				network_updateColor();
+			}
+		} else if((key == WINDOW_KEY_CURSOR_UP || key == WINDOW_KEY_CURSOR_DOWN || key == WINDOW_KEY_CURSOR_LEFT
+				   || key == WINDOW_KEY_CURSOR_RIGHT)
+				  && camera_mode == CAMERAMODE_SPECTATOR) {
+			int py;
+			unsigned int cur = rgb((int)(fog_color[0] * 255), (int)(fog_color[1] * 255), (int)(fog_color[2] * 255));
+			for(py = 0; py < 8; py++) {
+				for(int px = 0; px < 8; px++) {
+					if(texture_block_color(px, py) == cur) {
+						switch(key) {
+							case WINDOW_KEY_CURSOR_LEFT:
+								px--;
+								if(px < 0) px = 7;
+								break;
+							case WINDOW_KEY_CURSOR_RIGHT:
+								px++;
+								if(px > 7) px = 0;
+								break;
+							case WINDOW_KEY_CURSOR_UP:
+								py--;
+								if(py < 0) py = 7;
+								break;
+							case WINDOW_KEY_CURSOR_DOWN:
+								py++;
+								if(py > 7) py = 0;
+								break;
+						}
+						cur = texture_block_color(px, py);
+						fog_color[0] = (cur & 0xFF) / 255.0F;
+						fog_color[1] = ((cur >> 8) & 0xFF) / 255.0F;
+						fog_color[2] = ((cur >> 16) & 0xFF) / 255.0F;
+						spec_color_palette_time = window_time() + 2.0;
+						py = 10;
+						break;
+					}
 				}
 			}
+			if(py < 10) {
+				cur = texture_block_color(3, 0);
+				fog_color[0] = (cur & 0xFF) / 255.0F;
+				fog_color[1] = ((cur >> 8) & 0xFF) / 255.0F;
+				fog_color[2] = ((cur >> 16) & 0xFF) / 255.0F;
+				spec_color_palette_time = window_time() + 2.0;
+			}
+		}
 
 			if(key == WINDOW_KEY_RELOAD && camera_mode == CAMERAMODE_FPS
 			   && players[local_player_id].held_item == TOOL_GUN) {
@@ -3960,7 +4023,7 @@ static struct texture* hud_settings_ui_images(int icon_id, bool* resize) {
 }
 
 static void render_setting_row(mu_Context* ctx, struct config_setting* a, int width) {
-	mu_layout_row(ctx, 3, (int[]) {0.65F * width, -0.05F * width, -1}, 0);
+	mu_layout_row(ctx, 2, (int[]) {0.65F * width, -1}, 0);
 
 	switch(a->type) {
 		case CONFIG_TYPE_STRING:
@@ -3993,30 +4056,6 @@ static void render_setting_row(mu_Context* ctx, struct config_setting* a, int wi
 			break;
 	}
 
-	if(*a->help) {
-		mu_push_id(ctx, &a->value, sizeof(a->value));
-
-		int pw = ctx->text_width(ctx->style->font, a->help, 0) + ctx->style->padding * 4;
-		int ph = ctx->style->size.y + ctx->style->padding * 4 + ctx->style->title_height;
-		if(mu_begin_window_ex(ctx, "Help",
-							  mu_rect((settings.window_width - pw) / 2,
-									  (settings.window_height - ph) / 2, pw, ph),
-							  MU_OPT_AUTOSIZE | MU_OPT_NORESIZE | MU_OPT_NOSCROLL | MU_OPT_POPUP | MU_OPT_CLOSED)) {
-			mu_layout_row(ctx, 1, (int[]) {-1}, 0);
-			mu_text(ctx, a->help);
-			mu_end_window(ctx);
-		}
-		if(mu_button(ctx, "?")) {
-			mu_open_popup(ctx, "Help");
-			mu_Container* cnt = mu_get_container(ctx, "Help");
-			if(cnt)
-				cnt->rect = mu_rect((settings.window_width - pw) / 2,
-									(settings.window_height - ph) / 2, pw, ph);
-		}
-		mu_pop_id(ctx);
-	} else {
-		mu_layout_next(ctx);
-	}
 }
 
 static int setting_in_category(struct config_setting* a, int cat) {
@@ -4062,7 +4101,6 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
 			"Graphics",
 			"HUD/UI",
 			"Chat",
-			"Help",
 		};
 		int cat_count = sizeof(cat_names) / sizeof(cat_names[0]);
 
@@ -4087,19 +4125,11 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
 
 		mu_begin_panel(ctx, "Settings");
 
-		if(selected_category == cat_count - 1) {
-			mu_layout_row(ctx, 1, (int[]) {-1}, -1);
-			mu_text(ctx,
-					"To edit a value directly, [SHIFT]+LMB on its container to change it using the keyboard. You can "
-					"also drag on a container to modify its value relative to its current one.\n\n"
-					"Settings are auto-applied when changed.");
-		} else {
-			int width = mu_get_current_container(ctx)->body.w;
-			for(int k = 0; k < list_size(&config_settings); k++) {
-				struct config_setting* a = list_get(&config_settings, k);
-				if(setting_in_category(a, selected_category))
-					render_setting_row(ctx, a, width);
-			}
+		int width = mu_get_current_container(ctx)->body.w;
+		for(int k = 0; k < list_size(&config_settings); k++) {
+			struct config_setting* a = list_get(&config_settings, k);
+			if(setting_in_category(a, selected_category))
+				render_setting_row(ctx, a, width);
 		}
 
 		mu_end_panel(ctx);
@@ -4108,10 +4138,13 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
 	}
 
 	if(memcmp(&settings, &settings_tmp, sizeof(struct RENDER_OPTIONS)) != 0) {
+		int textured_changed = settings.textured_blocks != settings_tmp.textured_blocks;
 		memcpy(&settings, &settings_tmp, sizeof(struct RENDER_OPTIONS));
 		window_fromsettings();
 		sound_volume(settings.volume / 10.0F);
 		config_save();
+		if(textured_changed)
+			chunk_rebuild_all();
 	}
 }
 
@@ -4250,7 +4283,7 @@ static void hud_skins_render(mu_Context* ctx, float scalex, float scaley) {
 				}
 
 				if(mu_button_ex(ctx, "", 0, MU_OPT_ALIGNCENTER)) {
-					if(skins_apply(skins_selected_category, i) == 0) {
+					if(skins_apply(skins_selected_category, i, 1) == 0) {
 						skins_selected_entry[skins_selected_category] = i;
 						switch(skins_selected_category) {
 							case SKIN_SPADE: settings.skin_spade = i; break;

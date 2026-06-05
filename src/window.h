@@ -147,6 +147,7 @@ void window_setmouseloc(double x, double y);
 void window_swapping(int value);
 void window_init(void);
 void window_fromsettings(void);
+void window_apply(void);
 void window_deinit(void);
 void window_update(void);
 int window_closed(void);

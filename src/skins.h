@@ -51,7 +51,8 @@ extern struct skin_category skin_categories[SKIN_CATEGORIES];
 
 void skins_init(void);
 void skins_scan(void);
-int skins_apply(enum skin_category_type category, int entry);
+int skins_apply(enum skin_category_type category, int entry, int models);
+void skins_apply_all(int models);
 void skins_render_preview(enum skin_category_type category, int entry, float cx, float cy, float size);
 
 #endif

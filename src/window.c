@@ -66,6 +66,13 @@ static const char* window_internal_keyname(int internal) {
 	}
 }
 
+static int window_pending_apply = 0;
+static int pending_multisamples;
+static int pending_vsync;
+static int pending_fullscreen;
+static int pending_width;
+static int pending_height;
+
 #ifdef USE_GLFW
 
 static bool joystick_available = false;
@@ -328,22 +335,33 @@ void window_init() {
 }
 
 void window_fromsettings() {
-	glfwWindowHint(GLFW_SAMPLES, settings.multisamples);
-	glfwSetWindowSize(hud_window->impl, settings.window_width, settings.window_height);
+	pending_multisamples = settings.multisamples;
+	pending_vsync = settings.vsync;
+	pending_fullscreen = settings.fullscreen;
+	pending_width = settings.window_width;
+	pending_height = settings.window_height;
+	window_pending_apply = 1;
+}
 
-	if(settings.vsync < 2)
-		window_swapping(settings.vsync);
-	if(settings.vsync > 1)
+void window_apply() {
+	if(!window_pending_apply) return;
+	window_pending_apply = 0;
+
+	glfwWindowHint(GLFW_SAMPLES, pending_multisamples);
+
+	if(pending_vsync < 2)
+		window_swapping(pending_vsync);
+	if(pending_vsync > 1)
 		window_swapping(0);
 
 	const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
-	if(settings.fullscreen)
-		glfwSetWindowMonitor(hud_window->impl, glfwGetPrimaryMonitor(), 0, 0, settings.window_width,
-							 settings.window_height, mode->refreshRate);
-	else
-		glfwSetWindowMonitor(hud_window->impl, NULL, (mode->width - settings.window_width) / 2,
-							 (mode->height - settings.window_height) / 2, settings.window_width, settings.window_height,
-							 0);
+	if(pending_fullscreen) {
+		glfwSetWindowMonitor(hud_window->impl, glfwGetPrimaryMonitor(), 0, 0,
+							 mode->width, mode->height, mode->refreshRate);
+	} else {
+		glfwSetWindowMonitor(hud_window->impl, NULL, (mode->width - pending_width) / 2,
+							 (mode->height - pending_height) / 2, pending_width, pending_height, 0);
+	}
 }
 
 void window_deinit() {
@@ -425,17 +443,29 @@ void window_textinput(int allow) {
 }
 
 void window_fromsettings() {
-	SDL_SetWindowSize(hud_window->impl, settings.window_width, settings.window_height);
+	pending_multisamples = settings.multisamples;
+	pending_vsync = settings.vsync;
+	pending_fullscreen = settings.fullscreen;
+	pending_width = settings.window_width;
+	pending_height = settings.window_height;
+	window_pending_apply = 1;
+}
 
-	if(settings.vsync < 2)
-		window_swapping(settings.vsync);
-	if(settings.vsync > 1)
+void window_apply() {
+	if(!window_pending_apply) return;
+	window_pending_apply = 0;
+
+	if(pending_vsync < 2)
+		window_swapping(pending_vsync);
+	if(pending_vsync > 1)
 		window_swapping(0);
 
-	if(settings.fullscreen)
+	if(pending_fullscreen) {
 		SDL_SetWindowFullscreen(hud_window->impl, SDL_WINDOW_FULLSCREEN);
-	else
+	} else {
 		SDL_SetWindowFullscreen(hud_window->impl, 0);
+		SDL_SetWindowSize(hud_window->impl, pending_width, pending_height);
+	}
 }
 
 void window_keyname(int keycode, char* output, size_t length) {

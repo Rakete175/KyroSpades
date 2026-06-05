@@ -44,6 +44,8 @@ struct channel chunk_work_queue;
 struct channel chunk_result_queue;
 pthread_spinlock_t chunk_block_queue_lock;
 
+int chunk_gen = 0;
+
 struct chunk_work_packet {
 	size_t chunk_x;
 	size_t chunk_y;
@@ -55,6 +57,7 @@ struct chunk_result_packet {
 	int max_height;
 	struct tesselator tesselator;
 	uint32_t* minimap_data;
+	int gen;
 };
 
 struct chunk_render_call {
@@ -69,6 +72,7 @@ void chunk_init() {
 			struct chunk* c = chunks + x + y * CHUNKS_PER_DIM;
 			c->created = false;
 			c->max_height = 1;
+			c->gen = 0;
 			c->x = x;
 			c->y = y;
 		}
@@ -104,11 +108,16 @@ void chunk_render(struct chunk_render_call* c) {
 		matrix_translate(matrix_model, c->mirror_x * map_size_x, 0.0F, c->mirror_y * map_size_z);
 		matrix_upload();
 
-		// glPolygonMode(GL_FRONT, GL_LINE);
+		if(c->chunk->display_list.has_texcoord) {
+			glEnable(GL_TEXTURE_2D);
+			glBindTexture(GL_TEXTURE_2D, texture_blocks.texture_id);
+			glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+		}
 
 		glx_displaylist_draw(&c->chunk->display_list, GLX_DISPLAYLIST_NORMAL);
 
-		// glPolygonMode(GL_FRONT, GL_FILL);
+		if(c->chunk->display_list.has_texcoord)
+			glDisable(GL_TEXTURE_2D);
 
 		matrix_pop(matrix_model);
 	}
@@ -184,6 +193,7 @@ void* chunk_generate(void* data) {
 
 		struct chunk_result_packet result;
 		result.chunk = work.chunk;
+		result.gen = work.chunk->gen;
 		result.minimap_data = malloc(CHUNK_SIZE * CHUNK_SIZE * sizeof(uint32_t));
 		tesselator_create(&result.tesselator, VERTEX_INT, 0, settings.textured_blocks);
 
@@ -877,7 +887,7 @@ void chunk_update_all() {
 		struct chunk_result_packet* result = results + drain - 1;
 
 		for(size_t k = 0; k < drain; k++, result--) {
-			if(!result->chunk->updated) {
+			if(!result->chunk->updated && result->gen == result->chunk->gen) {
 				result->chunk->updated = true;
 
 				if(!result->chunk->created) {
@@ -903,6 +913,11 @@ void chunk_update_all() {
 
 void chunk_rebuild_all() {
 	channel_clear(&chunk_work_queue);
+	chunk_gen++;
+
+	for(int k = 0; k < CHUNKS_PER_DIM; k++)
+		for(int i = 0; i < CHUNKS_PER_DIM; i++)
+			chunks[i + k * CHUNKS_PER_DIM].gen = chunk_gen;
 
 	for(int k = CHUNKS_PER_DIM / 2; k >= 0; k--) {
 		for(int i = k; i < CHUNKS_PER_DIM - k; i++) {

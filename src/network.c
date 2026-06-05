@@ -37,6 +37,7 @@
 #include "particle.h"
 #include "texture.h"
 #include "chunk.h"
+#include "skins.h"
 #include "gmi.h"
 #include "config.h"
 #include "demo.h"
@@ -401,6 +402,7 @@ free(decompressed);
 		libdeflate_free_decompressor(d);
 	}
 	compressed_chunk_data_offset = 0;
+	skins_apply_all(0);
 }
 void read_PacketFogColor(void* data, int len) {
 	struct PacketFogColor* p = (struct PacketFogColor*)data;
@@ -476,6 +478,7 @@ void read_PacketCreatePlayer(void* data, int len) {
 			local_player_grenades = 3;
 			local_player_lasttool = TOOL_GUN;
 			weapon_set(false);
+			skins_apply_all(0);
 		}
 	}
 }
@@ -755,6 +758,7 @@ void read_PacketRestock(void* data, int len) {
 	local_player_blocks = 50;
 	local_player_grenades = 3;
 	weapon_set(true);
+	skins_apply_all(0);
 	if(!demo_mute_effects())
 		sound_create(SOUND_LOCAL, &sound_switch, 0.0F, 0.0F, 0.0F);
 }
