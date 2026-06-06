@@ -78,7 +78,6 @@ extern struct RENDER_OPTIONS {
 	int disable_raw_input;
 	int ui_spacing;
 	int ui_padding;
-	float ui_scale;
 	int esp_in_spec;
 	float ao_multiplier;
 	int show_live_player_count;

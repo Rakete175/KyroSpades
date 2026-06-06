@@ -667,8 +667,8 @@ void display() {
 	matrix_identity(matrix_model);
 	matrix_upload();
 	matrix_upload_p();
-	float scalex = (settings.window_width / 800.0F) * settings.ui_scale;
-	float scalef = (settings.window_height / 600.0F) * settings.ui_scale;
+	float scalex = (settings.window_width / 800.0F);
+	float scalef = (settings.window_height / 600.0F);
 
 	if(hud_active->render_2D) {
 		mu_Context* ctx = hud_active->ctx;
@@ -1096,7 +1096,6 @@ int main(int argc, char** argv) {
 	settings.skin_player = 0;
 	settings.skin_intel = 0;
 	settings.skin_tent = 0;
-	settings.ui_scale = 1.0F;
 	settings.chat_mention_r = 255;
 	settings.chat_mention_g = 255;
 	strcpy(settings.name, "DEV_CLIENT");

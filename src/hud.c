@@ -2836,7 +2836,12 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 						p.player_id = local_player_id;
 						p.team = new_team;
 						network_send(PACKET_CHANGETEAM_ID, &p, sizeof(p));
-						screen_current = SCREEN_NONE;
+						// If switching from spectator to a team, show weapon select
+						if(players[local_player_id].team == TEAM_SPECTATOR && new_team != TEAM_SPECTATOR) {
+							screen_current = SCREEN_GUN_SELECT;
+						} else {
+							screen_current = SCREEN_NONE;
+						}
 						return;
 					} else {
 						local_player_newteam = new_team;
@@ -4424,9 +4429,12 @@ static void hud_demolist_render(mu_Context* ctx, float scalex, float scaley) {
 			mu_layout_row(ctx, 3, (int[]) {-(bw * 2 + sp * 3 + 1), bw, bw}, 0);
 			if(mu_button_ex(ctx, name, 0, MU_OPT_NOFRAME)) {
 				if(demo_playback_open(demo_files[i])) {
-					hud_change(&hud_ingame);
+					/* Initialize game state for demo playback */
 					camera_mode = CAMERAMODE_SPECTATOR;
 					cameracontroller_reset_spectator_velocity();
+					/* Process initial packets to load map and set up world state */
+					network_update();
+					hud_change(&hud_ingame);
 				}
 			}
 			if(mu_button_ex(ctx, "Delete", 0, MU_OPT_NOFRAME)) {

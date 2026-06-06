@@ -312,7 +312,6 @@ void config_save() {
 	config_seti("client", "disable_raw_input", settings.disable_raw_input);
 	config_seti("client", "ui_spacing", settings.ui_spacing);
 	config_seti("client", "ui_padding", settings.ui_padding);
-	config_setf("client", "ui_scale", settings.ui_scale);
 	config_setf("client", "ao_multiplier", settings.ao_multiplier);
 	config_seti("client", "show_live_player_count", settings.show_live_player_count);
 	config_seti("client", "ads_zoom_animation", settings.ads_zoom_animation);
@@ -414,7 +413,6 @@ static int config_read_key(void* user, const char* section, const char* name, co
 		IMPORT_SETTING(settings.disable_raw_input, disable_raw_input, atoi(value));
 		IMPORT_SETTING(settings.ui_spacing, ui_spacing, atoi(value));
 		IMPORT_SETTING(settings.ui_padding, ui_padding, atoi(value));
-		IMPORT_SETTING(settings.ui_scale, ui_scale, fmaxf(0.25F, atof(value)));
 		IMPORT_SETTING(settings.ao_multiplier, ao_multiplier, fmaxf(0.0F, atof(value)));
 		IMPORT_SETTING(settings.show_live_player_count, show_live_player_count, atoi(value));
 		IMPORT_SETTING(settings.ads_zoom_animation, ads_zoom_animation, atoi(value));
@@ -1172,16 +1170,6 @@ void config_reload() {
 				 .max = 32,
 				 .help = "Added padding for UI elements",
 				 .name = "UI Padding",
-				 .category = "HUD/UI Settings",
-			 });
-	list_add(&config_settings,
-			 &(struct config_setting) {
-				 .value = &settings_tmp.ui_scale,
-				 .type = CONFIG_TYPE_FLOAT,
-				 .min = 0.25F,
-				 .max = 2.0F,
-				 .help = "Multiplier for overall UI size",
-				 .name = "UI Scale",
 				 .category = "HUD/UI Settings",
 			 });
 	list_add(&config_settings,
