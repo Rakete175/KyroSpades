@@ -432,7 +432,7 @@ void cameracontroller_spectator(float dt) {
 		// If no valid player found, disable bodyview mode
 		if(!found) {
 			cameracontroller_bodyview_mode = 0;
-			cameracontroller_bodyview_player = -1; // Reset to invalid state
+			cameracontroller_bodyview_player = 0;
 		}
 	}
 
@@ -542,7 +542,7 @@ void cameracontroller_bodyview(float dt) {
 	// If no valid player found, disable bodyview mode
 	if(!found) {
 		cameracontroller_bodyview_mode = 0;
-		cameracontroller_bodyview_player = -1; // Reset to invalid state
+		cameracontroller_bodyview_player = 0;
 		return;
 	}
 

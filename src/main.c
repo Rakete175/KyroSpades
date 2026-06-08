@@ -397,7 +397,7 @@ void display() {
 			int local_id = (camera_mode == CAMERAMODE_FPS) ? local_player_id : cameracontroller_bodyview_player;
 			
 			// Validate local_id before any array access to prevent crashes in spectator mode
-			if(local_id >= PLAYERS_MAX) {
+			if(local_id < 0 || local_id >= PLAYERS_MAX) {
 				local_id = local_player_id;
 			}
 

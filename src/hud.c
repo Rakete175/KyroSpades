@@ -1579,8 +1579,8 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 		}
 
 		if(camera_mode == CAMERAMODE_SPECTATOR && spec_color_palette_time > window_time()) {
-			unsigned int cur = rgb((int)(fog_color[0] * 255), (int)(fog_color[1] * 255),
-								   (int)(fog_color[2] * 255));
+			unsigned int cur = rgb((int)(fog_color[0] * 255.0F + 0.5F), (int)(fog_color[1] * 255.0F + 0.5F),
+								   (int)(fog_color[2] * 255.0F + 0.5F));
 			for(int y = 0; y < 8; y++) {
 				for(int x = 0; x < 8; x++) {
 					if(texture_block_color(x, y) == cur) {
@@ -2719,7 +2719,7 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 				   || key == WINDOW_KEY_CURSOR_RIGHT)
 				  && camera_mode == CAMERAMODE_SPECTATOR) {
 			int py;
-			unsigned int cur = rgb((int)(fog_color[0] * 255), (int)(fog_color[1] * 255), (int)(fog_color[2] * 255));
+			unsigned int cur = rgb((int)(fog_color[0] * 255.0F + 0.5F), (int)(fog_color[1] * 255.0F + 0.5F), (int)(fog_color[2] * 255.0F + 0.5F));
 			for(py = 0; py < 8; py++) {
 				for(int px = 0; px < 8; px++) {
 					if(texture_block_color(px, py) == cur) {
@@ -2948,9 +2948,9 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 						break;
 					case CAMERA_HITTYPE_NONE:
 					default:
-						players[local_player_id].block.red = fog_color[0] * 255;
-						players[local_player_id].block.green = fog_color[1] * 255;
-						players[local_player_id].block.blue = fog_color[2] * 255;
+						players[local_player_id].block.red = fog_color[0] * 255.0F + 0.5F;
+						players[local_player_id].block.green = fog_color[1] * 255.0F + 0.5F;
+						players[local_player_id].block.blue = fog_color[2] * 255.0F + 0.5F;
 						break;
 				}
 				network_updateColor();
