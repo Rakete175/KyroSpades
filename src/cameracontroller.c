@@ -552,6 +552,9 @@ void cameracontroller_bodyview(float dt) {
 	float k;
 	float traverse_lengths[2] = {-1, -1};
 	for(k = 0.0F; k < 5.0F; k += 0.05F) {
+		// early exit: both forward and backward traverse lengths found
+		if(traverse_lengths[0] >= 0 && traverse_lengths[1] >= 0)
+			break;
 		// Validate cameracontroller_bodyview_player before each access
 		if(cameracontroller_bodyview_player >= PLAYERS_MAX || cameracontroller_bodyview_player < 0) {
 			break;
