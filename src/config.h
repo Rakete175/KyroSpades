@@ -85,6 +85,7 @@ extern struct RENDER_OPTIONS {
 	float rifle_ads_fov;
 	float shotgun_ads_fov;
 	float smg_ads_fov;
+	int disable_corpse_despawn;
 	int auto_demo_recording;
 	int player_stats;
 	int player_technical_stats;
@@ -106,6 +107,7 @@ extern struct RENDER_OPTIONS {
 	int skin_player;
 	int skin_intel;
 	int skin_tent;
+	int debug_log;
 } settings, settings_tmp;
 
 extern struct list config_keys;

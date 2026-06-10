@@ -281,6 +281,7 @@ void sound_load(struct Sound_wav* wav, char* name, float min, float max) {
 		log_fatal("Could not load sound %s", name);
 		exit(1);
 	}
+	log_debug("Loaded sound: %s (%ich, %iHz, %lu samples)", name, channels, samplerate, (unsigned long)samplecount);
 
 	short* audio;
 	if(channels > 1) { // convert stereo to mono

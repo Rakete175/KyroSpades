@@ -139,6 +139,8 @@ int texture_create(struct texture* t, char* filename) {
 		return 0;
 	}
 
+	log_debug("Loaded texture: %s (%ix%i)", filename, t->width, t->height);
+
 	texture_resize_pow2(t, 0);
 
 	glGenTextures(1, &t->texture_id);

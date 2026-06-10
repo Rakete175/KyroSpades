@@ -94,6 +94,8 @@ int overlaps_with_player(int bx, int by, int bz) {
 
 int button_map[3];
 
+struct CorpseEntry corpses[CORPSE_MAX];
+
 unsigned char local_player_id = 0;
 unsigned char local_player_health = 100;
 unsigned char local_player_blocks = 50;
@@ -134,11 +136,126 @@ struct Player players[PLAYERS_MAX];
 #define WEAPON_PRIMARY 1
 #define FALL_DAMAGE_SCALAR 4096
 
+void player_save_corpse(int player_id) {
+	if(player_id < 0 || player_id >= PLAYERS_MAX)
+		return;
+	if(!settings.disable_corpse_despawn)
+		return;
+
+	struct Player* p = &players[player_id];
+
+	/* find a free slot */
+	int slot = -1;
+	for(int k = 0; k < CORPSE_MAX; k++) {
+		if(!corpses[k].active) {
+			slot = k;
+			break;
+		}
+	}
+	/* if full, evict oldest (first active slot) */
+	if(slot < 0) {
+		for(int k = 0; k < CORPSE_MAX; k++) {
+			if(corpses[k].active) {
+				slot = k;
+				break;
+			}
+		}
+	}
+	if(slot < 0)
+		return;
+
+	corpses[slot].active = 1;
+	corpses[slot].player_id = player_id;
+	corpses[slot].pos = p->pos;
+	corpses[slot].orientation = p->orientation;
+	corpses[slot].orientation_smooth = p->orientation_smooth;
+	corpses[slot].velocity = p->physics.velocity;
+	corpses[slot].team = p->team;
+}
+
+void player_clear_corpses(void) {
+	for(int k = 0; k < CORPSE_MAX; k++)
+		corpses[k].active = 0;
+}
+
+void player_update_corpses(float dt) {
+	if(!settings.disable_corpse_despawn)
+		return;
+
+	for(int k = 0; k < CORPSE_MAX; k++) {
+		if(!corpses[k].active)
+			continue;
+
+		/* skip corpses whose player is still dead (regular path handles them) */
+		int pid = corpses[k].player_id;
+		if(pid >= 0 && pid < PLAYERS_MAX && !players[pid].alive && players[pid].connected)
+			continue;
+
+		/* freeze settled corpses */
+		if(corpses[k].velocity.x * corpses[k].velocity.x
+			 + corpses[k].velocity.y * corpses[k].velocity.y
+			 + corpses[k].velocity.z * corpses[k].velocity.z < 0.001F)
+			continue;
+
+		corpses[k].velocity.y -= dt;
+
+		AABB dead_bb = {0};
+		aabb_set_size(&dead_bb, 0.7F, 0.15F, 0.7F);
+		aabb_set_center(&dead_bb,
+			corpses[k].pos.x + corpses[k].velocity.x * dt * 32.0F,
+			corpses[k].pos.y + corpses[k].velocity.y * dt * 32.0F,
+			corpses[k].pos.z + corpses[k].velocity.z * dt * 32.0F);
+
+		if(!aabb_intersection_terrain(&dead_bb, 0)) {
+			corpses[k].pos.x += corpses[k].velocity.x * dt * 32.0F;
+			corpses[k].pos.y += corpses[k].velocity.y * dt * 32.0F;
+			corpses[k].pos.z += corpses[k].velocity.z * dt * 32.0F;
+		} else {
+			corpses[k].velocity.x *= 0.36F;
+			corpses[k].velocity.y *= -0.36F;
+			corpses[k].velocity.z *= 0.36F;
+		}
+	}
+}
+
+void player_render_corpses(void) {
+	if(!settings.disable_corpse_despawn)
+		return;
+
+	for(int k = 0; k < CORPSE_MAX; k++) {
+		if(!corpses[k].active)
+			continue;
+
+		int pid = corpses[k].player_id;
+
+		/* skip if the player is still dead and connected (regular render handles it) */
+		if(pid >= 0 && pid < PLAYERS_MAX && !players[pid].alive && players[pid].connected)
+			continue;
+
+		struct CorpseEntry* c = &corpses[k];
+
+		float l = sqrt(distance3D(c->orientation_smooth.x, c->orientation_smooth.y, c->orientation_smooth.z, 0, 0, 0));
+		float ox = c->orientation_smooth.x / l;
+		float oz = c->orientation_smooth.z / l;
+
+		matrix_push(matrix_model);
+		matrix_translate(matrix_model, c->pos.x, c->pos.y + 0.25F, c->pos.z);
+		matrix_pointAt(matrix_model, ox, 0.0F, oz);
+		matrix_rotate(matrix_model, 90.0F, 0.0F, 1.0F, 0.0F);
+		if(c->velocity.y < 0.05F && c->pos.y < 1.5F)
+			matrix_translate(matrix_model, 0.0F, (sin(game_time() * 1.5F) - 1.0F) * 0.1F, 0.0F);
+		matrix_upload();
+		kv6_render(&model_playerdead, c->team);
+		matrix_pop(matrix_model);
+	}
+}
+
 void player_init() {
 	for(int k = 0; k < PLAYERS_MAX; k++) {
 		player_reset(&players[k]);
 		players[k].score = 0;
 	}
+	player_clear_corpses();
 }
 
 void player_reset(struct Player* p) {
@@ -360,6 +477,7 @@ void player_update(float dt, int locked) {
 			}
 		}
 	}
+	player_update_corpses(dt);
 }
 
 void player_render_all() {
@@ -524,6 +642,8 @@ void player_render_all() {
 			}
 		}
 	}
+
+	player_render_corpses();
 }
 
 static float foot_function(const struct Player* p) {

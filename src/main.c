@@ -654,6 +654,9 @@ void display() {
 				glPopMatrix();
 			}
 		}
+		if(needs_postproc && network_map_transfer && postproc.fbo) {
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		}
 	}
 
 	if(hud_active->render_3D)
@@ -1130,16 +1133,24 @@ int main(int argc, char** argv) {
 	settings.iron_sight = 1;
 	config_reload();
 
+	if(settings.debug_log) {
+		log_set_level(LOG_TRACE);
+		log_info("Debug logging enabled (LOG_TRACE)");
+	}
+
 	window_init();
 
 #ifndef OPENGL_ES
 	if(glewInit())
 		log_error("Could not load extended OpenGL functions!");
+	else
+		log_debug("GLEW initialized successfully");
 #endif
 
 	log_info("Vendor: %s", glGetString(GL_VENDOR));
 	log_info("Renderer: %s", glGetString(GL_RENDERER));
 	log_info("Version: %s", glGetString(GL_VERSION));
+	log_debug("GLSL: %s", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
 	if(settings.multisamples > 0) {
 		glEnable(GL_MULTISAMPLE);
@@ -1226,6 +1237,17 @@ int main(int argc, char** argv) {
 		}
 
 		display();
+
+		if(network_map_transfer_end) {
+			static float loading_screen_seen_time = 0.0F;
+			if(loading_screen_seen_time == 0.0F)
+				loading_screen_seen_time = window_time();
+			if(window_time() - loading_screen_seen_time >= 0.5F) {
+				network_map_transfer = 0;
+				network_map_transfer_end = 0;
+				loading_screen_seen_time = 0.0F;
+			}
+		}
 
 		sound_update();
 		network_update();

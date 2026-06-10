@@ -170,6 +170,20 @@ extern struct Player {
 } players[PLAYERS_MAX];
 // pyspades/pysnip/piqueserver sometimes uses ids that are out of range
 
+#define CORPSE_MAX 256
+
+struct CorpseEntry {
+	int active;
+	int player_id;
+	struct Position pos;
+	struct Orientation orientation;
+	struct Orientation orientation_smooth;
+	struct Velocity velocity;
+	unsigned char team;
+};
+
+extern struct CorpseEntry corpses[CORPSE_MAX];
+
 void player_on_held_item_change(struct Player* p);
 int player_can_spectate(struct Player* p);
 float player_section_height(int section);
@@ -185,5 +199,9 @@ void player_reset(struct Player* p);
 int player_move(struct Player* p, float fsynctics, int id);
 int player_uncrouch(struct Player* p);
 int overlaps_with_player(int bx, int by, int bz);
+void player_save_corpse(int player_id);
+void player_clear_corpses(void);
+void player_update_corpses(float dt);
+void player_render_corpses(void);
 
 #endif
