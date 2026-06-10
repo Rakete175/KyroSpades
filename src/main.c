@@ -1096,6 +1096,9 @@ int main(int argc, char** argv) {
 	settings.skin_player = 0;
 	settings.skin_intel = 0;
 	settings.skin_tent = 0;
+	settings.exposure = 5.0F;
+	settings.contrast = 5.0F;
+	settings.vignette = 10.0F;
 	settings.chat_mention_r = 255;
 	settings.chat_mention_g = 255;
 	strcpy(settings.name, "DEV_CLIENT");
@@ -1193,23 +1196,33 @@ int main(int argc, char** argv) {
 				}
 			}
 
-			// these run at min. ~60fps but as fast as possible
-			double step = fmin(dt, PHYSICS_STEP_TIME);
-			while(step > 0 && physics_time_fast >= step) {
-				physics_time_fast -= step;
-				if(!demo_is_frozen())
-					player_update(step, 0);
-				camera_update(step);
-				tracer_update(step);
-				particle_update(step);
-				if(settings.rain) {
-					particle_create_rain();
-				}
-				if(settings.snow) {
-					particle_create_snow();
-				}
-				map_collapsing_update(step);
+		// these run at min. ~60fps but as fast as possible
+		// cap catch-up iterations to prevent spiral of death:
+		// if a frame is slow (high dt), the loop would run many times,
+		// each calling expensive camera updates (e.g. bodyview ray-march),
+		// making the next frame even slower in a feedback loop.
+		double step = fmin(dt, PHYSICS_STEP_TIME);
+		int max_catchup = 4;
+		int catchup_count = 0;
+		while(step > 0 && physics_time_fast >= step && catchup_count < max_catchup) {
+			physics_time_fast -= step;
+			if(!demo_is_frozen())
+				player_update(step, 0);
+			camera_update(step);
+			tracer_update(step);
+			particle_update(step);
+			if(settings.rain) {
+				particle_create_rain();
 			}
+			if(settings.snow) {
+				particle_create_snow();
+			}
+			map_collapsing_update(step);
+			catchup_count++;
+		}
+		// discard excess accumulated time to prevent buildup
+		if(physics_time_fast > PHYSICS_STEP_TIME * 2)
+			physics_time_fast = PHYSICS_STEP_TIME;
 		}
 
 		display();

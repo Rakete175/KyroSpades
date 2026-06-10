@@ -68,7 +68,7 @@ int glx_shader(const char* vertex, const char* fragment) {
 	int program = glCreateProgram();
 	if(vertex)
 		glAttachShader(program, v);
-	if(vertex)
+	if(fragment)
 		glAttachShader(program, f);
 	glLinkProgram(program);
 	return program;
