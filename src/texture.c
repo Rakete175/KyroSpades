@@ -124,6 +124,10 @@ void texture_filter(struct texture* t, int filter) {
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 			break;
+		case TEXTURE_WRAP_CLAMP:
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			break;
 	}
 	glBindTexture(GL_TEXTURE_2D, 0);
 }
@@ -179,6 +183,19 @@ void texture_delete(struct texture* t) {
 }
 
 void texture_draw_sector(struct texture* t, float x, float y, float w, float h, float u, float v, float us, float vs) {
+	/* State-leak guard: world / tesselator / KV6 model rendering may leave
+	   GL_COLOR_ARRAY or GL_NORMAL_ARRAY enabled with stale pointers, which in
+	   fixed-function GL silently overrides glColor3ub / glColor4f for every
+	   vertex (tinted HUD textures, black minimap). Force them off and restore
+	   standard MODULATE in case GL_TEXTURE_ENV_MODE was left as GL_COMBINE.
+	   Runs on all platforms deliberately: the same latent leak exists on
+	   desktop GL, and the cost of a few redundant state calls per HUD draw is
+	   negligible. */
+	glDisableClientState(GL_COLOR_ARRAY);
+	glDisableClientState(GL_NORMAL_ARRAY);
+	glActiveTexture(GL_TEXTURE0);
+	glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
 	glEnable(GL_TEXTURE_2D);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -234,6 +251,14 @@ void texture_draw_rotated(struct texture* t, float x, float y, float w, float h,
 }
 
 void texture_draw_empty(float x, float y, float w, float h) {
+	/* See note in texture_draw_sector: defensively disable leaked client
+	   arrays so glColor3ub / glColor4f at the call site actually takes
+	   effect (otherwise stale per-vertex color is used). */
+	glDisableClientState(GL_COLOR_ARRAY);
+	glDisableClientState(GL_NORMAL_ARRAY);
+	glActiveTexture(GL_TEXTURE0);
+	glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
 	float vertices[12] = {x, y, x, y - h, x + w, y - h, x, y, x + w, y - h, x + w, y};
 	float texcoords[12] = {0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.0F};
 	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -248,6 +273,12 @@ void texture_draw_empty(float x, float y, float w, float h) {
 #define texture_emit_rotated(tx, ty, x, y, a) cos(a) * (x)-sin(a) * (y) + (tx), sin(a) * (x) + cos(a) * (y) + (ty)
 
 void texture_draw_empty_rotated(float x, float y, float w, float h, float angle) {
+	/* See note in texture_draw_sector. */
+	glDisableClientState(GL_COLOR_ARRAY);
+	glDisableClientState(GL_NORMAL_ARRAY);
+	glActiveTexture(GL_TEXTURE0);
+	glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
 	float vertices[12]
 		= {texture_emit_rotated(x, y, -w / 2, h / 2, angle), texture_emit_rotated(x, y, -w / 2, -h / 2, angle),
 		   texture_emit_rotated(x, y, w / 2, -h / 2, angle), texture_emit_rotated(x, y, -w / 2, h / 2, angle),
@@ -267,10 +298,15 @@ void texture_resize_pow2(struct texture* t, int min_size) {
 		return;
 	int max_size = 0;
 	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_size);
+	/* If the query failed (no current context / GL error), max_size stays 0
+	   and the texture would be "resized" to 0x0 below. Bail out instead. */
+	if(max_size <= 0 && min_size <= 0)
+		return;
 	max_size = max(max_size, min_size);
 
 	int w = 1, h = 1;
-	if(strstr(glGetString(GL_EXTENSIONS), "ARB_texture_non_power_of_two") != NULL) {
+	const char* exts = (const char*)glGetString(GL_EXTENSIONS);
+	if(exts != NULL && strstr(exts, "ARB_texture_non_power_of_two") != NULL) {
 		if(t->width <= max_size && t->height <= max_size)
 			return;
 		w = t->width;
@@ -301,12 +337,24 @@ void texture_resize_pow2(struct texture* t, int min_size) {
 			float py = (float)y / (float)h * (float)t->height;
 			float u = px - (int)px;
 			float v = py - (int)py;
-			unsigned int aa = ((unsigned int*)t->pixels)[(int)px + (int)py * t->width];
-			unsigned int ba = ((unsigned int*)t->pixels)[min((int)px + (int)py * t->width + 1, t->width * t->height)];
-			unsigned int ab
-				= ((unsigned int*)t->pixels)[min((int)px + (int)py * t->width + t->width, t->width * t->height)];
-			unsigned int bb
-				= ((unsigned int*)t->pixels)[min((int)px + (int)py * t->width + 1 + t->width, t->width * t->height)];
+			/* Bilinear neighbor fetch. The old code clamped the flat index to
+			   t->width * t->height, which is ONE PAST the end of the pixel
+			   buffer (last valid element is w*h - 1). Every resample therefore
+			   read 4 bytes past the malloc'd buffer on its last pixels. On
+			   devices where the allocation ends flush against a page boundary
+			   (Scudo guard pages on newer Android), that read lands on an
+			   unmapped page -> SIGSEGV SEGV_ACCERR in texture_resize_pow2 at
+			   startup. Clamp each axis to its own edge instead; this also
+			   fixes the old behavior of x+1 wrapping into the next row. */
+			int px0 = (int)px, py0 = (int)py;
+			if(px0 > t->width - 1)  px0 = t->width - 1;
+			if(py0 > t->height - 1) py0 = t->height - 1;
+			int px1 = min(px0 + 1, t->width - 1);
+			int py1 = min(py0 + 1, t->height - 1);
+			unsigned int aa = ((unsigned int*)t->pixels)[px0 + py0 * t->width];
+			unsigned int ba = ((unsigned int*)t->pixels)[px1 + py0 * t->width];
+			unsigned int ab = ((unsigned int*)t->pixels)[px0 + py1 * t->width];
+			unsigned int bb = ((unsigned int*)t->pixels)[px1 + py1 * t->width];
 			pixels_new[x + y * w] = 0;
 			pixels_new[x + y * w] |= (int)((1.0F - v) * u * red(ba) + (1.0F - v) * (1.0F - u) * red(aa)
 										   + v * u * red(bb) + v * (1.0F - u) * red(ab));
@@ -354,61 +402,54 @@ void texture_gradient_fog(unsigned int* gradient) {
 }
 
 // Helper function to get a random PNG file from the bg folder
+/* Collect *.png names from a file_dir_list() walk. */
+struct texture_bg_list {
+	char** names;
+	int count, cap;
+};
+
+static void texture_bg_collect(const char* name, void* user) {
+	struct texture_bg_list* l = (struct texture_bg_list*)user;
+	size_t len = strlen(name);
+	if(len <= 4 || strcmp(name + len - 4, ".png") != 0)
+		return;
+	if(l->count == l->cap) {
+		l->cap = l->cap ? l->cap * 2 : 16;
+		l->names = realloc(l->names, l->cap * sizeof(char*));
+		CHECK_ALLOCATION_ERROR(l->names)
+	}
+	l->names[l->count] = malloc(len + 1);
+	CHECK_ALLOCATION_ERROR(l->names[l->count])
+	memcpy(l->names[l->count++], name, len + 1);
+}
+
 static char* texture_get_random_bg() {
 	static char bg_path[512];
-	char bg_folder[] = "png/bg";
-	
-	// Check if bg folder exists
-	if(!file_dir_exists(bg_folder)) {
-		// Default to ui/bg.png if bg folder doesn't exist
+
+	/* Previously this enumerated png/bg with opendir()/readdir() directly.
+	   That works on desktop, but on Android the backgrounds live inside the
+	   APK as assets and are invisible to the POSIX filesystem API -- the
+	   scan came up empty, fell back to png/ui/bg.png (which no longer
+	   ships), and the menu rendered on plain black. file_dir_list() now
+	   also knows how to enumerate APK assets, so both platforms share one
+	   path here. Picked once per app launch (texture_init runs once), so
+	   the background stays put across connects/disconnects and rotates on
+	   restart. Note: no srand() here anymore -- main() already seeds, and
+	   reseeding from time(NULL) mid-init just stomped the global RNG. */
+	struct texture_bg_list list = {0};
+	if(file_dir_list("png/bg", texture_bg_collect, &list) <= 0 || list.count == 0) {
+		free(list.names);
 		return "png/ui/bg.png";
 	}
-	
-	// Open directory and count PNG files
-	DIR* dir = opendir(bg_folder);
-	if(!dir) {
-		return "png/ui/bg.png";
-	}
-	
-	// First pass: count PNG files
-	int png_count = 0;
-	struct dirent* entry;
-	while((entry = readdir(dir)) != NULL) {
-		if(entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {
-			size_t len = strlen(entry->d_name);
-			if(len > 4 && strcmp(entry->d_name + len - 4, ".png") == 0) {
-				png_count++;
-			}
-		}
-	}
-	
-	if(png_count == 0) {
-		closedir(dir);
-		return "png/ui/bg.png";
-	}
-	
-	// Second pass: select random PNG
-	srand(time(NULL));
-	int target = rand() % png_count;
-	
-	rewinddir(dir);
-	int current = 0;
-	while((entry = readdir(dir)) != NULL) {
-		if(entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {
-			size_t len = strlen(entry->d_name);
-			if(len > 4 && strcmp(entry->d_name + len - 4, ".png") == 0) {
-				if(current == target) {
-					snprintf(bg_path, sizeof(bg_path), "%s/%s", bg_folder, entry->d_name);
-					closedir(dir);
-					return bg_path;
-				}
-				current++;
-			}
-		}
-	}
-	
-	closedir(dir);
-	return "png/ui/bg.png";
+
+	int target = rand() % list.count;
+	snprintf(bg_path, sizeof(bg_path), "png/bg/%s", list.names[target]);
+
+	for(int k = 0; k < list.count; k++)
+		free(list.names[k]);
+	free(list.names);
+
+	return bg_path;
 }
 
 void texture_init() {
@@ -481,6 +522,7 @@ void texture_init() {
 	texture_create_buffer(&texture_color_selection, 64, 64, (unsigned char*)pixels, 1);
 
 	texture_create_buffer(&texture_minimap, map_size_x, map_size_z, NULL, 1);
+	texture_filter(&texture_minimap, TEXTURE_WRAP_CLAMP);
 
 	unsigned int* gradient = malloc(512 * 512 * sizeof(unsigned int));
 	CHECK_ALLOCATION_ERROR(gradient)

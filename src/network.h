@@ -25,6 +25,10 @@
 #define BS_VER_ARCH "x86_64"
 #elif defined(__i386__)
 #define BS_VER_ARCH "i686"
+#elif defined(__aarch64__)
+#define BS_VER_ARCH "aarch64"
+#elif defined(__arm__)
+#define BS_VER_ARCH "armv7"
 #else
 #define BS_VER_ARCH "unknown"
 #endif

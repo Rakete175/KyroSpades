@@ -207,6 +207,7 @@ struct mu_Context {
   mu_Vec2 scroll_delta;
   int mouse_down;
   int mouse_pressed;
+  int hover_is_draggable;
   int key_down;
   int key_pressed;
   char input_text[32];

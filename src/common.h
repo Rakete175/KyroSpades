@@ -25,8 +25,16 @@
 #include <GL/glew.h>
 #else
 #ifdef USE_SDL
-#include <SDL2/SDL_opengles.h>
+#include <SDL2/SDL_opengles.h>  /* GLES 1.x — fixed-function pipeline */
+#include <GLES2/gl2.h>           /* GLES 2.0 — FBOs, shaders           */
 #endif
+/* Compatibility shims for code that doesn't run on Android at runtime
+   (glx_version is 0 so needs_postproc is always false) but still must compile:
+     glOrtho  → glOrthof  (GLES 1.x uses float-suffix variants)
+     glReadBuffer → no-op (not available in any GLES version)          */
+#define glOrtho(l, r, b, t, n, f)     glOrthof((float)(l), (float)(r), (float)(b), (float)(t), (float)(n), (float)(f))
+#define glReadBuffer(x) ((void)(x))
+#include "gles_immediate_stubs.h" /* immediate-mode no-ops for GLES */
 #define glColor3f(r, g, b) glColor4f(r, g, b, 1.0F)
 #define glColor3ub(r, g, b) glColor4ub(r, g, b, 255)
 #define glDepthRange(a, b) glDepthRangef(a, b)

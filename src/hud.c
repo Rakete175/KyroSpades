@@ -1,3 +1,4 @@
+#include "gles_immediate_stubs.h"
 /*
 	Copyright (c) 2017-2020 ByteBit
 
@@ -122,8 +123,24 @@ inline int hud_accent_color() {
 	return rgb(settings.ui_accent_r, settings.ui_accent_g, settings.ui_accent_b);
 }
 
+float hud_ui_scale(void) {
+#if defined(__ANDROID__)
+	/* Enlarge touch targets on physically small, high-resolution screens.
+	   Android-only for now: the >=1920 heuristic would otherwise also double
+	   the UI on ordinary 1080p desktop monitors. Proper DPI-based scaling for
+	   desktop can be added later. Recompute every call (no caching): the
+	   surface rotates at runtime and the real resolution isn't known yet when
+	   hud_init runs, so a cached value would lock in the wrong scale. */
+	int big = settings.window_width > settings.window_height
+		? settings.window_width : settings.window_height;
+	return (big >= 1920) ? 2.0F : 1.0F;
+#else
+	return 1.0F;
+#endif
+}
+
 static int mu_text_height(mu_Font font) {
-	return 16.F;
+	return (int)(16.F * hud_ui_scale());
 }
 
 static int mu_text_width(mu_Font font, const char* text, int len) {
@@ -157,6 +174,40 @@ static mu_Color mu_accent_color(float m, int a) {
 static void mu_text_accent_color(mu_Context* ctx, float m) {
 	mu_Color color = mu_accent_color(m, 255);
 	mu_text_color(ctx, color.r, color.g, color.b);
+}
+
+/* --- Focus-driven soft-keyboard (IME) management -------------------------
+   Calling window_textinput(1) unconditionally on screen init pops the
+   Android soft keyboard whenever a menu merely opens, and starting/stopping
+   the IME on every hud transition is expensive and crash-prone. Instead,
+   textboxes report whether they hold microui focus each frame, and the IME
+   is toggled only on actual focus transitions (i.e. when the user taps the
+   field). The in-game chat keeps managing window_textinput() itself;
+   hud_ime_update() backs off whenever the active hud has no microui
+   context. */
+static int hud_ime_focus_frame = 0;
+
+static int hud_textbox(mu_Context* ctx, char* buf, int bufsz, int opt) {
+	/* mu_textbox_ex derives its id from the buffer pointer value; computing
+	   it the same way here lets us know if this textbox holds focus */
+	mu_Id id = mu_get_id(ctx, &buf, sizeof(buf));
+	int res = mu_textbox_ex(ctx, buf, bufsz, opt);
+	if(ctx->focus == id)
+		hud_ime_focus_frame = 1;
+	return res;
+}
+
+void hud_ime_update() {
+	static int ime_active = -1;
+	if(!hud_active->ctx) {
+		ime_active = -1; /* ingame: chat code owns window_textinput() */
+		return;
+	}
+	if(hud_ime_focus_frame != ime_active) {
+		window_textinput(hud_ime_focus_frame);
+		ime_active = hud_ime_focus_frame;
+	}
+	hud_ime_focus_frame = 0;
 }
 
 void hud_change(struct hud* new) {
@@ -674,6 +725,28 @@ static int hud_ingame_onscreencontrol(int index, char* str, int activate) {
 						if(activate == 1)
 							mouse_click(hud_window, WINDOW_MOUSE_RMB, WINDOW_PRESS, 0);
 						return 1;
+					/* Jump/Crouch buttons below the left joystick. These poke
+					   window_pressed_keys directly (like the joystick does for
+					   movement) instead of synthesizing key events: the camera
+					   controller polls the pressed state every frame, which
+					   gives correct hold semantics for swimming up and for
+					   staying crouched. */
+					case 66:
+						if(str)
+							strcpy(str, "Jump");
+						if(activate == 0)
+							window_pressed_keys[WINDOW_KEY_SPACE] = 0;
+						if(activate == 1)
+							window_pressed_keys[WINDOW_KEY_SPACE] = 1;
+						return 1;
+					case 67:
+						if(str)
+							strcpy(str, "Crouch");
+						if(activate == 0)
+							window_pressed_keys[WINDOW_KEY_CROUCH] = 0;
+						if(activate == 1)
+							window_pressed_keys[WINDOW_KEY_CROUCH] = 1;
+						return 1;
 				}
 			}
 		}
@@ -951,6 +1024,12 @@ static void demo_playback_render_overlay(float scalef) {
 
 static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 	// window_mousemode(camera_mode==CAMERAMODE_SELECTION?WINDOW_CURSOR_ENABLED:WINDOW_CURSOR_DISABLED);
+
+	/* World/model rendering can leave GL_TEXTURE_ENV_MODE set to GL_BLEND
+	   (fog) or GL_COMBINE (team colorize), which makes HUD textures ignore
+	   glColor and sample incorrectly (e.g. the minimap rendered black).
+	   Force the standard modulate mode for all HUD drawing. */
+	glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
 	hud_active->render_localplayer = players[local_player_id].team != TEAM_SPECTATOR
 		&& (screen_current == SCREEN_NONE || camera_mode != CAMERAMODE_FPS);
@@ -1988,9 +2067,37 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 				texture_draw_empty(settings.window_width - 144 * scalef, 586 * scalef, 130 * scalef, 130 * scalef);
 				glColor3f(1.0F, 1.0F, 1.0F);
 
-				texture_draw_sector(&texture_minimap, settings.window_width - 143 * scalef, 585 * scalef, 128 * scalef,
-									128 * scalef, (camera_x - half_vp) / 512.0F, (camera_z - half_vp) / 512.0F,
-									viewport / 512.0F, viewport / 512.0F);
+				{
+					/* Previously this used texture_draw_sector() with
+					   fractional texcoords u=(camera_x-64)/512 .. u+0.25.
+					   Every other ingredient of that call (state guards,
+					   blending, the texture itself, the draw function) is
+					   proven good elsewhere in the same frame: the fullscreen
+					   map draws this exact texture fine, and the icon draws
+					   right after use the identical prologue/epilogue. Only
+					   this one combination (sub-rect texcoords on the
+					   subimage-updated minimap texture) came out black on the
+					   Android GLES1 driver. Sidestep it: draw the FULL map
+					   with plain 0..1 coords (the path that provably works)
+					   and clip the visible 128x128 window with scissoring,
+					   which is core GLES 1.1. Output is pixel-identical,
+					   except map edges now show the black backdrop instead of
+					   CLAMP_TO_EDGE smear, which arguably looks better. */
+					float box_x = settings.window_width - 143 * scalef;
+					float box_top = 585 * scalef;
+					float box_size = 128 * scalef;
+
+					glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
+					glEnable(GL_SCISSOR_TEST);
+					glScissor((int)box_x, (int)(box_top - box_size), (int)ceil(box_size), (int)ceil(box_size));
+					texture_draw(&texture_minimap, box_x - (camera_x - 64.0F) * scalef,
+								 box_top + (camera_z - 64.0F) * scalef, 512 * scalef, 512 * scalef);
+					glDisable(GL_SCISSOR_TEST);
+
+					int gl_err = glGetError();
+					if(gl_err != 0)
+						log_warn("minimap draw: glGetError() = 0x%04X", gl_err);
+				}
 
 				tracer_minimap(0, scalef, view_x, view_z, viewport);
 
@@ -2095,6 +2202,7 @@ texture_draw_empty_rotated(settings.window_width - 143 * scalef + tent2_x * map_
 						}
 					}
 				}
+				glColor3f(1.0F, 1.0F, 1.0F);
 			}
 		}
 
@@ -2175,6 +2283,7 @@ texture_draw_empty_rotated(settings.window_width - 143 * scalef + tent2_x * map_
 	}
 
 #ifdef USE_TOUCH
+	glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 	glColor3f(1.0F, 1.0F, 1.0F);
 	if(camera_mode == CAMERAMODE_FPS || camera_mode == CAMERAMODE_SPECTATOR) {
 		texture_draw_rotated(&texture_ui_joystick, settings.window_height * 0.3F, settings.window_height * 0.3F,
@@ -2209,6 +2318,28 @@ texture_draw_empty_rotated(settings.window_width - 143 * scalef + tent2_x * map_
 							 settings.window_height * 0.1F, 0.0F);
 		font_centered(settings.window_width - settings.window_height * 0.075F, settings.window_height * 0.47F,
 					  settings.window_height * 0.04F, str);
+	}
+	/* Jump + Crouch side by side directly below the left joystick (the
+	   joystick circle ends at 0.1 * window_height; these plates occupy the
+	   strip underneath it). Only shown alongside the joystick, i.e. when
+	   actually controlling a player or spectating in fly mode. */
+	if(camera_mode == CAMERAMODE_FPS || camera_mode == CAMERAMODE_SPECTATOR) {
+		/* Crouch left, Jump right -- mirroring the muscle memory of
+		   CTRL (left) / Space (right) on a PC keyboard. */
+		if(hud_ingame_onscreencontrol(67, str, -1)) {
+			texture_draw_rotated(&texture_ui_input, settings.window_height * 0.195F,
+								 settings.window_height * 0.05F, settings.window_height * 0.15F,
+								 settings.window_height * 0.1F, 0.0F);
+			font_centered(settings.window_height * 0.195F, settings.window_height * 0.07F,
+						  settings.window_height * 0.04F, str);
+		}
+		if(hud_ingame_onscreencontrol(66, str, -1)) {
+			texture_draw_rotated(&texture_ui_input, settings.window_height * 0.405F,
+								 settings.window_height * 0.05F, settings.window_height * 0.15F,
+								 settings.window_height * 0.1F, 0.0F);
+			font_centered(settings.window_height * 0.405F, settings.window_height * 0.07F,
+						  settings.window_height * 0.04F, str);
+		}
 	}
 #endif
 	demo_playback_render_overlay(scalef);
@@ -2325,7 +2456,7 @@ static void hud_switch_next_player() {
 		cameracontroller_bodyview_player = nearest_player;
 }
 
-static void hud_ingame_mouseclick(double x, double y, int button, int action, int mods) {
+void hud_ingame_mouseclick(double x, double y, int button, int action, int mods) {
 	if(chat_input_mode != CHAT_NO_INPUT) {
 		if(button == WINDOW_MOUSE_LMB) {
 			if(action == WINDOW_PRESS) {
@@ -3153,6 +3284,54 @@ static void hud_ingame_touch(void* finger, int action, float x, float y, float d
 	window_setmouseloc(x, y);
 	struct window_finger* f = (struct window_finger*)finger;
 
+	/* Selection overlays take priority over the on-screen controls below:
+	   while one is open the screen is divided into thirds (left / middle /
+	   right tap targets), and the control hit tests must not intercept and
+	   consume those taps first.
+
+	   A selection only fires on a TOUCH_UP whose TOUCH_DOWN this overlay saw
+	   itself. The top-bar buttons act on TOUCH_DOWN, so the very tap that
+	   opens the overlay would otherwise deliver its TOUCH_UP here and
+	   instantly "select" whatever third the button happens to sit in. */
+	static void* overlay_down_finger = NULL;
+	if(screen_current == SCREEN_TEAM_SELECT || screen_current == SCREEN_GUN_SELECT) {
+		int gun = (screen_current == SCREEN_GUN_SELECT);
+
+		/* The top button row stays live while the overlay is open so that
+		   tapping Team/Weapon again toggles the popup closed (those buttons
+		   send WINDOW_KEY_CHANGETEAM/-WEAPON, which the keyboard handler
+		   treats as "close"). Such a tap is a button press, not a thirds
+		   selection. */
+		if(action != TOUCH_MOVE) {
+			int k = 0;
+			while(hud_ingame_onscreencontrol(k, NULL, -1)) {
+				if(is_inside_centered(f->start.x, settings.window_height - f->start.y,
+									  settings.window_height * (0.2F + 0.175F * k),
+									  settings.window_height * 0.96F,
+									  settings.window_height * 0.15F, settings.window_height * 0.1F)) {
+					overlay_down_finger = NULL;
+					hud_ingame_onscreencontrol(k, NULL, (action == TOUCH_DOWN) ? 1 : 0);
+					return;
+				}
+				k++;
+			}
+		}
+
+		if(action == TOUCH_DOWN)
+			overlay_down_finger = finger;
+		if(action == TOUCH_UP && finger == overlay_down_finger) {
+			overlay_down_finger = NULL;
+			if(x < settings.window_width / 3)
+				hud_ingame_keyboard(WINDOW_KEY_SELECT1, WINDOW_PRESS, 0, 0);
+			else if(x > settings.window_width / 3 * 2)
+				hud_ingame_keyboard(gun ? WINDOW_KEY_SELECT3 : WINDOW_KEY_SELECT2, WINDOW_PRESS, 0, 0);
+			else
+				hud_ingame_keyboard(gun ? WINDOW_KEY_SELECT2 : WINDOW_KEY_SELECT3, WINDOW_PRESS, 0, 0);
+		}
+		return;
+	}
+	overlay_down_finger = NULL;
+
 	if(action != TOUCH_MOVE) {
 		int k = 0;
 		while(hud_ingame_onscreencontrol(k, NULL, -1)) {
@@ -3176,26 +3355,26 @@ static void hud_ingame_touch(void* finger, int action, float x, float y, float d
 			hud_ingame_onscreencontrol(65, NULL, (action == TOUCH_DOWN) ? 1 : 0);
 			return;
 		}
+		/* Jump/Crouch plates below the joystick. Hit-testing keys off the
+		   finger's START position (like every other control), so a press that
+		   begins on a button stays a button even if it wanders, and a stick
+		   grab can't slide into a button. */
+		if(camera_mode == CAMERAMODE_FPS || camera_mode == CAMERAMODE_SPECTATOR) {
+			if(is_inside_centered(f->start.x, settings.window_height - f->start.y, settings.window_height * 0.195F,
+								  settings.window_height * 0.05F, settings.window_height * 0.15F,
+								  settings.window_height * 0.1F)) {
+				hud_ingame_onscreencontrol(67, NULL, (action == TOUCH_DOWN) ? 1 : 0);
+				return;
+			}
+			if(is_inside_centered(f->start.x, settings.window_height - f->start.y, settings.window_height * 0.405F,
+								  settings.window_height * 0.05F, settings.window_height * 0.15F,
+								  settings.window_height * 0.1F)) {
+				hud_ingame_onscreencontrol(66, NULL, (action == TOUCH_DOWN) ? 1 : 0);
+				return;
+			}
+		}
 	}
 
-	if(screen_current == SCREEN_TEAM_SELECT && action == TOUCH_UP) {
-		if(x < settings.window_width / 3)
-			hud_ingame_keyboard(WINDOW_KEY_TOOL1, WINDOW_PRESS, 0, 0);
-		if(x > settings.window_width / 3 * 2)
-			hud_ingame_keyboard(WINDOW_KEY_TOOL2, WINDOW_PRESS, 0, 0);
-		if(x > settings.window_width / 3 && x < settings.window_width / 3 * 2)
-			hud_ingame_keyboard(WINDOW_KEY_TOOL3, WINDOW_PRESS, 0, 0);
-		return;
-	}
-	if(screen_current == SCREEN_GUN_SELECT && action == TOUCH_UP) {
-		if(x < settings.window_width / 3)
-			hud_ingame_keyboard(WINDOW_KEY_TOOL1, WINDOW_PRESS, 0, 0);
-		if(x > settings.window_width / 3 * 2)
-			hud_ingame_keyboard(WINDOW_KEY_TOOL3, WINDOW_PRESS, 0, 0);
-		if(x > settings.window_width / 3 && x < settings.window_width / 3 * 2)
-			hud_ingame_keyboard(WINDOW_KEY_TOOL2, WINDOW_PRESS, 0, 0);
-		return;
-	}
 	if(screen_current == SCREEN_NONE) {
 		if(action == TOUCH_DOWN && x > settings.window_width - settings.window_height * 0.25F
 		   && y < settings.window_height * 0.25F) {
@@ -3248,7 +3427,37 @@ static void hud_ingame_touch(void* finger, int action, float x, float y, float d
 				hud_ingame_mouseclick(0, 0, WINDOW_MOUSE_RMB, WINDOW_PRESS, 0);
 			return;
 		}
-		if(1) {
+		if(chat_input_mode == CHAT_NO_INPUT && f->start.x < settings.window_width * 0.4F
+		   && f->start.y > settings.window_height * 0.55F && absf(dy) > absf(dx)) {
+			static float chat_swipe_accum = 0.0F;
+			int max_offset = 127 - chat_messages;
+			if(max_offset < 0) max_offset = 0;
+			chat_swipe_accum += dy / (settings.window_height * 0.04F);
+			int step = (int)chat_swipe_accum;
+			if(step != 0) {
+				chat_swipe_accum -= step;
+				chat_scroll_offset += step;
+				if(chat_scroll_offset < 0) chat_scroll_offset = 0;
+				if(chat_scroll_offset > max_offset) chat_scroll_offset = max_offset;
+			}
+			return;
+		}
+		if(chat_input_mode != CHAT_NO_INPUT && f->start.x < settings.window_width * 0.4F 
+		   && absf(dy) > absf(dx) && action == TOUCH_MOVE) {
+			static float chat_history_input_accum = 0.0F;
+			int max_offset = 127 - chat_messages;
+			if(max_offset < 0) max_offset = 0;
+			chat_history_input_accum += dy / (settings.window_height * 0.04F);
+			int step = (int)chat_history_input_accum;
+			if(step != 0) {
+				chat_history_input_accum -= step;
+				chat_scroll_offset += step;
+				if(chat_scroll_offset < 0) chat_scroll_offset = 0;
+				if(chat_scroll_offset > max_offset) chat_scroll_offset = max_offset;
+			}
+			return;
+		}
+		if(0) {
 			camera_rot_x -= dx * 0.002F;
 			camera_rot_y += dy * 0.002F;
 			camera_overflow_adjust();
@@ -3285,6 +3494,22 @@ static int serverlist_checked_for_updates = 0;
 static int serverlist_con_established;
 static pthread_mutex_t serverlist_lock;
 
+/* Two-step server selection for touch: a first tap on a row only highlights it
+   (records its identifier here); a second tap on the same, already-highlighted
+   row actually joins. Tapping a different row moves the highlight there instead
+   of joining. Empty string means nothing is selected. */
+static char serverlist_selected[64] = "";
+
+/* Joining is deferred to the end of the render pass: server_c() blocks until
+   the connection is up and switches huds, so calling it from inside the row
+   loop both truncates the frame at the tapped row (everything below it never
+   renders, and that broken frame stays visible for the whole connect) and
+   runs hud_change() while microui windows are still open. */
+static bool serverlist_join_pending = false;
+static char serverlist_join_addr[256];
+static char serverlist_join_name[32];
+static bool serverlist_join_has_name = false;
+
 static struct serverlist_news_entry {
 	struct texture image;
 	char caption[65];
@@ -3313,6 +3538,8 @@ static void hud_serverlist_init() {
 
 	player_count = 0;
 	server_count = 0;
+	serverlist_selected[0] = '\0';
+	serverlist_join_pending = false;
 	request_serverlist = http_get("http://services.buildandshoot.com/serverlist.json", NULL);
 #ifdef JENKINS_BUILD
 	if (!serverlist_checked_for_updates) {
@@ -3331,9 +3558,18 @@ static void hud_serverlist_init() {
 	serverlist_con_established = request_serverlist != NULL;
 	memcpy(serverlist_input, settings.last_address, sizeof settings.last_address);
 
-	pthread_mutex_init(&serverlist_lock, NULL);
+	/* hud_serverlist_init doubles as the Refresh handler and runs on every
+	   visit to this screen. Re-running pthread_mutex_init() on a mutex that
+	   the async ping-update path may be holding is undefined behavior --
+	   initialize it exactly once. (The unconditional window_textinput(1)
+	   that used to live here is gone: the keyboard now opens only when the
+	   address field is focused, see hud_textbox/hud_ime_update.) */
+	static int serverlist_lock_ready = 0;
+	if(!serverlist_lock_ready) {
+		pthread_mutex_init(&serverlist_lock, NULL);
+		serverlist_lock_ready = 1;
+	}
 	pinned_load();
-	window_textinput(1);
 }
 
 static int compare_pinned(const void* a, const void* b) {
@@ -3562,27 +3798,67 @@ static void hud_common_nav(mu_Context* ctx, mu_Rect* frame, float scalex, float 
 	mu_Container* cnt = mu_get_current_container(ctx);
 	cnt->rect = *frame;
 
-	int A = ctx->text_width(ctx->style->font, "Servers", 0) * 1.5F;
-	int B = ctx->text_width(ctx->style->font, "Settings", 0) * 1.5F;
-	int C = ctx->text_width(ctx->style->font, "Controls", 0) * 1.5F;
-	int N = ctx->text_width(ctx->style->font, "Demos", 0) * 1.5F;
-	int D = ctx->text_width(ctx->style->font, "New updates", 0) * 1.2F;
-	int E = ctx->text_width(ctx->style->font, network_connected ? "Disconnect": "Exit", 0) * 1.5F;
-	int L = ctx->text_width(ctx->style->font, "Chat Log", 0) * 1.5F;
-
-	if(network_connected) {
-		if(serverlist_is_outdated) {
-			mu_layout_row(ctx, 7, (int[]) {B, C, N, L, D, E, -1}, 0);
-		} else {
-			mu_layout_row(ctx, 6, (int[]) {B, C, N, L, E, -1}, 0);
-		}
+	/* Build the right-hand status text FIRST: its width has to take part in
+	   the layout computation. Previously the status cell just received
+	   whatever space was left over after the fixed-width buttons, so on
+	   narrow windows it clipped ("...aying for 2m31s", truncated server
+	   counts). */
+	char total_str[128];
+	if(hud_active == &hud_serverlist) {
+		sprintf(total_str, (server_count > 0) ? "%i players on %i servers" : "No servers", player_count, server_count);
 	} else {
-		if(serverlist_is_outdated) {
-			mu_layout_row(ctx, 8, (int[]) {A, B, C, N, N, D, E, -1}, 0);
+		if(network_connected) {
+			sprintf(total_str, "Playing for %im%is", (int)window_time() / 60, (int)window_time() % 60);
 		} else {
-			mu_layout_row(ctx, 7, (int[]) {A, B, C, N, N, E, -1}, 0);
+			sprintf(total_str, "KyroSpades %s %s", KYROSPADES_VERSION, BS_VER_INFO);
 		}
 	}
+
+	/* Nav entries in DRAW order. The old code kept the width array and the
+	   button calls in two separate, manually synced lists -- and they had
+	   drifted apart: when connected, the widths row still contained the
+	   width for the hidden "Demos" tab, so "Chat Log" was sized for the
+	   label "Demos" and "Disconnect" for the label "Chat Log" (hence both
+	   rendering cramped). Build labels and widths from ONE list instead so
+	   they cannot disagree again. */
+	const char* labels[7];
+	float mults[7];
+	int n = 0;
+	if(!network_connected) { labels[n] = "Servers"; mults[n++] = 1.5F; }
+	labels[n] = "Settings"; mults[n++] = 1.5F;
+	labels[n] = "Controls"; mults[n++] = 1.5F;
+	labels[n] = "Skins"; mults[n++] = 1.5F;
+	if(!network_connected) { labels[n] = "Demos"; mults[n++] = 1.5F; }
+	if(network_connected) { labels[n] = "Chat Log"; mults[n++] = 1.5F; }
+	if(serverlist_is_outdated) { labels[n] = "New updates"; mults[n++] = 1.2F; }
+	labels[n] = network_connected ? "Disconnect" : "Exit"; mults[n++] = 1.5F;
+
+	int raw[7], widths[8];
+	int sum = 0;
+	for(int k = 0; k < n; k++) {
+		raw[k] = ctx->text_width(ctx->style->font, (char*)labels[k], 0);
+		widths[k] = raw[k] * mults[k];
+		sum += widths[k];
+	}
+
+	/* Reserve room for the status text, then check what's actually
+	   available in this row. If buttons + status don't fit, compress the
+	   buttons' padding (each carries 20-50% slack) down to a 1.05x floor
+	   before letting anything clip. Only if even that is not enough does
+	   the status text lose width -- i.e. on absurdly small windows. */
+	int status_w = ctx->text_width(ctx->style->font, total_str, 0) + ctx->style->padding * 2;
+	int inner = frame->w - ctx->style->padding * 2 - ctx->style->spacing * (n + 2);
+	if(sum + status_w > inner && sum > 0) {
+		float f = (float)(inner - status_w) / (float)sum;
+		for(int k = 0; k < n; k++) {
+			int minw = raw[k] * 1.05F;
+			int scaled = (int)(widths[k] * f);
+			widths[k] = max(scaled, minw);
+		}
+	}
+
+	widths[n] = -1;
+	mu_layout_row(ctx, n + 1, widths, 0);
 
 	if(!network_connected) {
 		hud_nav_button(ctx, &hud_serverlist, "Servers");
@@ -3618,23 +3894,17 @@ static void hud_common_nav(mu_Context* ctx, mu_Rect* frame, float scalex, float 
 			exit(0);
 	mu_text_color_default(ctx);
 
-	char total_str[128];
-	if(hud_active == &hud_serverlist) {
-		sprintf(total_str, (server_count > 0) ? "%i players on %i servers" : "No servers", player_count, server_count);
-	} else {
-		if(network_connected) {
-			sprintf(total_str, "Playing for %im%is", (int)window_time() / 60, (int)window_time() % 60);
-		} else {
-			sprintf(total_str, "KyroSpades %s %s", KYROSPADES_VERSION, BS_VER_INFO);
-		}
-	}
 	mu_button_ex(ctx, total_str, 0, MU_OPT_ALIGNRIGHT | MU_OPT_NOINTERACT);
 }
 
 static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
 	hud_common_render(ctx);
 
-	mu_Rect frame = mu_rect(settings.window_width / 2.F - fminf(1024.F, settings.window_width * 0.75F) / 2.F, 0, fminf(1024.F, settings.window_width * 0.75F), settings.window_height);
+	/* Widened from a 1024px cap / 75% of the window: on wide phone/tablet
+	   screens the old cap left the list covering only ~half the screen and
+	   squeezed the nav row. Kept conservative on purpose. */
+	float frame_w = fminf(1280.F, settings.window_width * 0.8F);
+	mu_Rect frame = mu_rect(settings.window_width / 2.F - frame_w / 2.F, 0, frame_w, settings.window_height);
 
 	if(mu_begin_window_ex(ctx, "Main", frame, MU_OPT_NOFRAME | MU_OPT_NOTITLE | MU_OPT_NORESIZE)) {
 		hud_common_nav(ctx, &frame, scalex, scaley);
@@ -3652,10 +3922,18 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
 				float size = settings.window_height * 0.3F - ctx->text_height(ctx->style->font) * 4.125F;
 				mu_layout_row(ctx, 1, (int[]) {size * current->tile_size}, size);
 				if(mu_button_ex(ctx, NULL, 32 + index, MU_OPT_NOFRAME)) {
-					if(!strncmp("aos://", current->url, 6))
-						server_c(current->url, current->caption);
-					else
+					if(!strncmp("aos://", current->url, 6)) {
+						strncpy(serverlist_join_addr, current->url,
+								sizeof(serverlist_join_addr) - 1);
+						serverlist_join_addr[sizeof(serverlist_join_addr) - 1] = '\0';
+						strncpy(serverlist_join_name, current->caption,
+								sizeof(serverlist_join_name) - 1);
+						serverlist_join_name[sizeof(serverlist_join_name) - 1] = '\0';
+						serverlist_join_has_name = true;
+						serverlist_join_pending = true;
+					} else {
 						file_url(current->url);
+					}
 				}
 				mu_layout_height(ctx, 0);
 				mu_text_color(ctx, red(current->color), green(current->color), blue(current->color));
@@ -3674,7 +3952,7 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
 		int c = ctx->text_width(ctx->style->font, "Join", 0) * 2.0F;
 		mu_layout_row(ctx, 4, (int[]) {-c - b, -b, -a, -1}, 0);
 
-		if(mu_textbox(ctx, serverlist_input, sizeof(serverlist_input)) & MU_RES_SUBMIT)
+		if(hud_textbox(ctx, serverlist_input, sizeof(serverlist_input), 0) & MU_RES_SUBMIT)
 			server_c(serverlist_input, NULL);
 		if(mu_button_ex(ctx, "Join", 16, MU_OPT_ALIGNRIGHT))
 			server_c(serverlist_input, NULL);
@@ -3691,7 +3969,14 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
 		int width = mu_get_current_container(ctx)->body.w;
 
 		int flag_width = ctx->style->size.y + ctx->style->padding * 2;
-		mu_layout_row(ctx, 5, (int[]) {fminf(82.F, 0.12F * width), 0.418F * width, 0.22F * width, 0.117F * width, -1}, 0);
+		/* The first column must never be narrower than its own header text:
+		   the old fixed 82px cap was tuned for the 1x font and truncated
+		   "Players" at larger UI scales. */
+		int players_w = ctx->text_width(ctx->style->font, "Players", 0) + ctx->style->padding * 2;
+		int col0_w = fminf(82.F * hud_ui_scale(), 0.12F * width);
+		if(col0_w < players_w)
+			col0_w = players_w;
+		mu_layout_row(ctx, 5, (int[]) {col0_w, 0.418F * width, 0.22F * width, 0.117F * width, -1}, 0);
 
 		if(mu_button(ctx, "Players")) {
 			pthread_mutex_lock(&serverlist_lock);
@@ -3720,11 +4005,12 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
 		}
 
 		mu_layout_row(ctx, 6,
-					  (int[]) {fminf(82.F, 0.12F * width), flag_width, 0.418F * width - flag_width - ctx->style->spacing * 2,
+					  (int[]) {col0_w, flag_width, 0.418F * width - flag_width - ctx->style->spacing * 2,
 							   0.22F * width, 0.117F * width, -1},
 					  0);
 
 		pthread_mutex_lock(&serverlist_lock);
+		bool any_row_tapped = false;
 		if(server_count > 0) {
 			char total_str[128];
 			int serverlist_need_sort = 0;
@@ -3741,22 +4027,50 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
 
 				mu_push_id(ctx, &serverlist[k].identifier, strlen(serverlist[k].identifier));
 
-				if(serverlist[k].pinned)
-					mu_text_color(ctx, 255 / f, 220 / f, 0);
-				else
-					mu_text_color(ctx, 230 / f, 230 / f, 230 / f);
-				bool join = false;
+				bool is_selected = strcmp(serverlist_selected, serverlist[k].identifier) == 0;
+
+				/* The selected row keeps full text brightness: the dimming for
+				   empty servers (f == 2) has too little contrast against the
+				   highlight band. */
+				if(is_selected)
+					f = 1;
+
+				/* Draw a persistent highlight band behind the currently selected
+				   row so the user can see what their first tap picked. Peek the
+				   row's rect, then restore the layout cursor so the real buttons
+				   lay out exactly where they would have. The band is drawn first
+				   so the row's text/icons render on top of it. A dark accent
+				   tint is used instead of MU_COLOR_BUTTONHOVER, whose light
+				   gray washed out the row text. */
+				if(is_selected) {
+					mu_Container* panel = mu_get_current_container(ctx);
+					mu_Layout* lay = &ctx->layout_stack.items[ctx->layout_stack.idx - 1];
+					mu_Layout saved = *lay;
+					mu_Rect cell = mu_layout_next(ctx);
+					*lay = saved; /* rewind: undo the slot the peek consumed */
+					mu_Rect band = mu_rect(panel->body.x, cell.y, panel->body.w, cell.h);
+					mu_draw_rect(ctx, band,
+						mu_color(settings.ui_accent_r * 2 / 5, settings.ui_accent_g * 2 / 5,
+								 settings.ui_accent_b * 2 / 5, 255));
+					mu_draw_box(ctx, band,
+						mu_color(settings.ui_accent_r, settings.ui_accent_g,
+								 settings.ui_accent_b, 255));
+				}
+
+
+				mu_text_color(ctx, 230 / f, 230 / f, 230 / f);
+				bool tapped = false;
 				if(mu_button_ex(ctx, total_str, 0, MU_OPT_NOFRAME | MU_OPT_ALIGNCENTER))
-					join = true;
+					tapped = true;
 				if(mu_button_ex(ctx, "", texture_flag_index(serverlist[k].country) + HUD_FLAG_INDEX_START,
 								MU_OPT_NOFRAME))
-					join = true;
+					tapped = true;
 				if(mu_button_ex(ctx, serverlist[k].name, 0, MU_OPT_NOFRAME))
-					join = true;
+					tapped = true;
 				if(mu_button_ex(ctx, serverlist[k].map, 0, MU_OPT_NOFRAME))
-					join = true;
+					tapped = true;
 				if(mu_button_ex(ctx, serverlist[k].gamemode, 0, MU_OPT_NOFRAME | MU_OPT_ALIGNCENTER))
-					join = true;
+					tapped = true;
 
 				if(serverlist[k].ping >= 0) {
 					if(serverlist[k].ping < 110)
@@ -3770,7 +4084,7 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
 				sprintf(total_str, "%ims", serverlist[k].ping);
 				if(mu_button_ex(ctx, (serverlist[k].ping >= 0) ? total_str : "?", 0,
 								MU_OPT_NOFRAME | MU_OPT_ALIGNCENTER))
-					join = true;
+					tapped = true;
 
 				if(serverlist[k].pinned) {
 					mu_Container* cnt = mu_get_current_container(ctx);
@@ -3790,9 +4104,26 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
 
 				mu_pop_id(ctx);
 
-				if(join) {
-					server_c(serverlist[k].identifier, serverlist[k].name);
-					break;
+				if(tapped) {
+					any_row_tapped = true;
+					if(is_selected) {
+						/* second tap on the already-selected row: join it
+						   (after this frame finished rendering) */
+						serverlist_selected[0] = '\0';
+						strncpy(serverlist_join_addr, serverlist[k].identifier,
+								sizeof(serverlist_join_addr) - 1);
+						serverlist_join_addr[sizeof(serverlist_join_addr) - 1] = '\0';
+						strncpy(serverlist_join_name, serverlist[k].name,
+								sizeof(serverlist_join_name) - 1);
+						serverlist_join_name[sizeof(serverlist_join_name) - 1] = '\0';
+						serverlist_join_has_name = true;
+						serverlist_join_pending = true;
+					} else {
+						/* first tap: just highlight this row */
+						strncpy(serverlist_selected, serverlist[k].identifier,
+								sizeof(serverlist_selected) - 1);
+						serverlist_selected[sizeof(serverlist_selected) - 1] = '\0';
+					}
 				}
 			}
 			if(serverlist_need_sort)
@@ -3802,6 +4133,15 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
 			mu_button_ex(ctx, "Fetching servers...", 0, MU_OPT_NOFRAME | MU_OPT_ALIGNCENTER);
 		}
 		pthread_mutex_unlock(&serverlist_lock);
+
+		/* A tap inside the server panel that didn't land on any row clears the
+		   selection. ctx->mouse_pressed is set on the frame the tap's click is
+		   processed; mu_mouse_over confines this to taps within the list area so
+		   nav-bar / header clicks don't wipe the highlight. */
+		if(ctx->mouse_pressed == MU_MOUSE_LEFT && !any_row_tapped
+		   && mu_mouse_over(ctx, mu_get_current_container(ctx)->body))
+			serverlist_selected[0] = '\0';
+
 		mu_text_color_default(ctx);
 		mu_end_panel(ctx);
 
@@ -3942,15 +4282,23 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
 				break;
 		}
 	}
+
+	/* Deferred join: every microui window of this frame is closed by now, so
+	   the frame the user sees during the (blocking) connect is complete. */
+	if(serverlist_join_pending) {
+		serverlist_join_pending = false;
+		server_c(serverlist_join_addr,
+				 serverlist_join_has_name ? serverlist_join_name : NULL);
+	}
 }
 
 static void hud_serverlist_touch(void* finger, int action, float x, float y, float dx, float dy) {
+	(void)finger;
 	window_setmouseloc(x, y);
-	/*switch(action) {
-		case TOUCH_DOWN: hud_serverlist_mouseclick(x, y, WINDOW_MOUSE_LMB, WINDOW_PRESS, 0); break;
-		case TOUCH_MOVE: hud_serverlist_mouselocation(x, y); break;
-		case TOUCH_UP: hud_serverlist_mouseclick(x, y, WINDOW_MOUSE_LMB, WINDOW_RELEASE, 0); break;
-	}*/
+	/* Drag pans the list; taps fall through to the generic synthetic-mouse path
+	   which single-clicks like every other menu. */
+	if(action == TOUCH_MOVE && hud_serverlist.ctx)
+		mu_input_scroll(hud_serverlist.ctx, 0, (int)(-dy));
 }
 
 struct hud hud_serverlist = {
@@ -4033,7 +4381,7 @@ static void render_setting_row(mu_Context* ctx, struct config_setting* a, int wi
 	switch(a->type) {
 		case CONFIG_TYPE_STRING:
 			mu_text(ctx, a->name);
-			mu_textbox(ctx, a->value, a->max + 1);
+			hud_textbox(ctx, a->value, a->max + 1, 0);
 			break;
 		case CONFIG_TYPE_INT:
 			if(a->max == 1 && a->min == 0) {
@@ -4162,7 +4510,10 @@ static void hud_settings_keyboard(int key, int action, int mods, int internal) {
 }
 
 static void hud_settings_touch(void* finger, int action, float x, float y, float dx, float dy) {
+	(void)finger;
 	window_setmouseloc(x, y);
+	if(action == TOUCH_MOVE && hud_settings.ctx)
+		mu_input_scroll(hud_settings.ctx, 0, (int)(-dy));
 }
 
 struct hud hud_settings = {
@@ -4490,7 +4841,7 @@ static void hud_demolist_render(mu_Context* ctx, float scalex, float scaley) {
 			mu_layout_row(ctx, 1, (int[]) {-1}, -ctx->text_height(ctx->style->font) * 1.5F);
 			mu_text(ctx, "Enter new name for the demo file:");
 			mu_layout_row(ctx, 1, (int[]) {-1}, 0);
-			int res = mu_textbox(ctx, demo_rename_buf, sizeof(demo_rename_buf));
+			int res = hud_textbox(ctx, demo_rename_buf, sizeof(demo_rename_buf), 0);
 			int bw = ctx->text_width(ctx->style->font, "Rename", 0) * 1.6F;
 			mu_layout_row(ctx, 2, (int[]) {-bw, -1}, 0);
 			if(mu_button(ctx, "Rename") || (res & MU_RES_SUBMIT)) {
@@ -4523,8 +4874,12 @@ static void hud_demolist_render(mu_Context* ctx, float scalex, float scaley) {
 static void hud_demolist_keyboard(int key, int action, int mods, int internal) {
 	(void)key; (void)action; (void)mods; (void)internal;
 }
+static void hud_demolist_touch(void* finger, int action, float x, float y, float dx, float dy) {
+	(void)finger; (void)action; (void)dx; (void)dy;
+	window_setmouseloc(x, y);
+}
 struct hud hud_demolist = { hud_demolist_init, NULL, hud_demolist_render, hud_demolist_keyboard,
-	NULL, NULL, NULL, NULL, NULL, 0, 0, NULL, };
+	NULL, NULL, NULL, hud_demolist_touch, NULL, 0, 0, NULL, };
 
 static void hud_controls_render(mu_Context* ctx, float scalex, float scaley) {
 	hud_common_render(ctx);

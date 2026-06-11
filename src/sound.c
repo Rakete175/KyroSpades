@@ -245,7 +245,20 @@ int sound_reload(struct Sound_wav* wav, const char* name, float min, float max) 
 		alDeleteBuffers(1, (ALuint*)&wav->openal_buffer);
 	unsigned int channels, samplerate;
 	uint64_t samplecount;
+#ifdef USE_ANDROID_FILE
+	/* On Android the wav files live inside the APK assets — dr_wav's fopen()
+	 * based loader can't see them. Read the whole file through file_load()
+	 * (AAssetManager-backed) and decode from memory instead. */
+	short* samples = NULL;
+	int file_len = file_size(name);
+	unsigned char* file_data = (file_len > 0) ? file_load(name) : NULL;
+	if(file_data) {
+		samples = drwav_open_and_read_memory_s16(file_data, file_len, &channels, &samplerate, &samplecount);
+		free(file_data);
+	}
+#else
 	short* samples = drwav_open_and_read_file_s16(name, &channels, &samplerate, &samplecount);
+#endif
 	if(samples == NULL) {
 		wav->openal_buffer = 0;
 		return -1;

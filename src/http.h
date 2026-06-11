@@ -211,6 +211,7 @@ Releases the resources acquired by `http_get` or `http_post`. Should be call whe
     #include <errno.h>
     #include <fcntl.h>
     #include <netdb.h>
+    #include <netinet/in.h>
     #define HTTP_SOCKET int
     #define HTTP_INVALID_SOCKET -1
 #endif

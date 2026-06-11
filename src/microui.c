@@ -144,6 +144,7 @@ void mu_begin(mu_Context *ctx) {
   ctx->next_hover_root = NULL;
   ctx->mouse_delta.x = ctx->mouse_pos.x - ctx->last_mouse_pos.x;
   ctx->mouse_delta.y = ctx->mouse_pos.y - ctx->last_mouse_pos.y;
+  ctx->hover_is_draggable = 0;
   ctx->frame++;
 }
 
@@ -868,6 +869,7 @@ int mu_slider_ex(mu_Context *ctx, mu_Real *value, mu_Real low, mu_Real high,
 
   /* handle normal mode */
   mu_update_control(ctx, id, base, opt);
+  if (ctx->hover == id) { ctx->hover_is_draggable = 1; }
 
   /* handle input */
   if (ctx->focus == id &&
@@ -909,6 +911,7 @@ int mu_number_ex(mu_Context *ctx, mu_Real *value, mu_Real step,
 
   /* handle normal mode */
   mu_update_control(ctx, id, base, opt);
+  if (ctx->hover == id) { ctx->hover_is_draggable = 1; }
 
   /* handle input */
   if (ctx->focus == id && ctx->mouse_down == MU_MOUSE_LEFT) {
@@ -1005,6 +1008,7 @@ void mu_end_treenode(mu_Context *ctx) {
                                                                             \
       /* handle input */                                                    \
       mu_update_control(ctx, id, base, 0);                                  \
+      if (ctx->hover == id) { ctx->hover_is_draggable = 1; }                \
       if (ctx->focus == id && ctx->mouse_down == MU_MOUSE_LEFT) {           \
         cnt->scroll.y += ctx->mouse_delta.y * cs.y / base.h;                \
       }                                                                     \
