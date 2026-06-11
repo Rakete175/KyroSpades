@@ -1,0 +1,157 @@
+// ─────────────────────────────────────────────────────────────────────────────
+//  app/build.gradle  —  KyroSpades Android
+// ─────────────────────────────────────────────────────────────────────────────
+//
+//  The KyroSpades source path resolves in this order:
+//
+//    1. kyrospades.path in local.properties   (per-machine override, gitignored)
+//    2. ../                                    (the repo root — this android/
+//                                               project lives inside the
+//                                               KyroSpades repository, so this
+//                                               is what CI and most devs use)
+//
+//  Native deps (libenet.a, libdeflate.a) must already exist at
+//  <kyrospades>/build-android/deps-install — run build_android.sh once, or in
+//  CI the "Build native deps" workflow step produces them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+plugins {
+    id 'com.android.application'
+}
+
+// ── Resolve KyroSpades source path ───────────────────────────────────────────
+def localProps = new Properties()
+def localPropsFile = rootProject.file('local.properties')
+if (localPropsFile.exists()) {
+    localProps.load(localPropsFile.newDataInputStream())
+}
+def ksPath = localProps.getProperty('kyrospades.path', '')
+if (!ksPath) {
+    // Default: this project sits at <repo>/android, so the repo root is ../
+    def repoRoot = rootProject.file('..')
+    if (new File(repoRoot, 'CMakeLists.txt').exists()) {
+        ksPath = repoRoot.canonicalPath
+    }
+}
+if (!ksPath) {
+    throw new GradleException(
+            "\n\nCould not locate the KyroSpades source tree.\n" +
+            "Either place this project at <KyroSpades>/android, or add this\n" +
+            "line to local.properties:\n" +
+            "  kyrospades.path=/path/to/KyroSpades\n"
+    )
+}
+
+// Pre-built deps from build_android.sh / CI (enet + libdeflate)
+def depsInstall = "${ksPath}/build-android/deps-install"
+
+// ── Optional release signing via environment (used by CI) ───────────────────
+// Set KS_RELEASE_KEYSTORE (path), KS_RELEASE_KEYSTORE_PASSWORD,
+// KS_RELEASE_KEY_ALIAS, KS_RELEASE_KEY_PASSWORD to sign release builds with a
+// real key. When unset, release builds fall back to the debug keystore so the
+// APK is still installable on any phone (sideload).
+def releaseKeystore = System.getenv('KS_RELEASE_KEYSTORE')
+
+android {
+    namespace 'com.example.kyrospades'
+    compileSdk 34
+    ndkVersion "27.2.12479018"
+
+    defaultConfig {
+        applicationId  'com.example.kyrospades'
+        minSdk          21
+        targetSdk       34
+        versionCode     1
+        versionName     '0.1.5'
+
+        ndk {
+            // Add 'armeabi-v7a' here too if you want 32-bit ARM support
+            abiFilters 'arm64-v8a'
+        }
+
+        externalNativeBuild {
+            cmake {
+                // Android is auto-detected; these mirror what build_android.sh passes
+                arguments(
+                        '-DENABLE_SDL=ON',
+                        '-DENABLE_GLFW=OFF',
+                        '-DENABLE_OPENGLES=ON',
+                        '-DENABLE_TOUCH=ON',
+                        '-DENABLE_ANDROID_FILE=ON',
+                        '-DENABLE_SOUND=ON',
+                        '-DENABLE_RPC=OFF',
+                        '-DSDL_HIDAPI=OFF',
+                        '-DSDL_HIDAPI_JOYSTICK=OFF',
+                        '-DCMAKE_POLICY_VERSION_MINIMUM=3.5',
+                        // Reuse the pre-built enet + libdeflate + openal-soft
+                        "-Denet_LIBRARY=${depsInstall}/lib/libenet.a",
+                        "-Denet_INCLUDE_DIR=${depsInstall}/include",
+                        "-Ddeflate_LIBRARY=${depsInstall}/lib/libdeflate.a",
+                        "-Ddeflate_INCLUDE_DIR=${depsInstall}/include",
+                        "-DOPENAL_LIBRARY=${depsInstall}/lib/libopenal.a",
+                        "-DOPENAL_INCLUDE_DIR=${depsInstall}/include"
+                )
+            }
+        }
+    }
+
+    // Game assets are read at runtime via SDL_RWFromFile. Keep these formats
+    // uncompressed in the APK so SDL_RWsize reports the true length and seeking
+    // works (a compressed asset reporting the wrong size can corrupt the load
+    // buffer in file_load()).
+    aaptOptions {
+        noCompress 'ttf', 'kv6', 'wav', 'png', 'ini'
+    }
+
+    signingConfigs {
+        if (releaseKeystore) {
+            ksRelease {
+                storeFile     file(releaseKeystore)
+                storePassword System.getenv('KS_RELEASE_KEYSTORE_PASSWORD')
+                keyAlias      System.getenv('KS_RELEASE_KEY_ALIAS')
+                keyPassword   System.getenv('KS_RELEASE_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled   false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                    'proguard-rules.pro'
+            // Real keystore when CI provides one, debug key otherwise — an
+            // unsigned APK would refuse to install, a debug-signed one is fine.
+            signingConfig releaseKeystore ? signingConfigs.ksRelease : signingConfigs.debug
+        }
+        debug {
+            jniDebuggable true
+        }
+    }
+
+    lint {
+        // Don't let lint findings abort assembleRelease in CI; lint can still
+        // be run explicitly with ./gradlew lint.
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
+    // ── Point Gradle at KyroSpades's CMakeLists.txt ───────────────────────────
+    externalNativeBuild {
+        cmake {
+            // Root CMakeLists.txt — the one that has project(KyroSpades C)
+            path    "${ksPath}/CMakeLists.txt"
+            version '3.22.1'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    // Unused now that the theme is android:Theme.Black.NoTitleBar.Fullscreen,
+    // but harmless to keep.
+    implementation 'com.google.android.material:material:1.9.0'
+}
