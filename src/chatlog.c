@@ -41,6 +41,10 @@ static void resolve_mouse_target(mu_Context* ctx, int* out_line, int* out_char);
 
 #define CHATLOG_MAX_LINES 2048
 #define CHATLOG_TEXT_HEIGHT 16
+
+static int chatlog_text_height(void) {
+	return (int)(CHATLOG_TEXT_HEIGHT * hud_ui_scale());
+}
 /* Must match the second dimension of chat[][][] in main.c. Reading past
    this is undefined - the loop walked into adjacent memory before. */
 #define CHATLOG_RING_SIZE 128
@@ -100,6 +104,11 @@ static int prev_history_count = 0;
 
 #define CTXMENU_W 220
 #define CTXMENU_H 26
+
+static int ctxmenu_height(void) {
+	int h = chatlog_text_height() + 12;
+	return h < CTXMENU_H ? CTXMENU_H : h;
+}
 #define CTXMENU_PREVIEW 18
 
 enum {
@@ -124,8 +133,6 @@ static int  filter_hide_server = 0;
 static mu_Rect filter_clear_btn;
 static mu_Rect filter_server_btn;
 
-#define LINKMODAL_W 480
-#define LINKMODAL_H 150
 
 static int    linkmodal_visible = 0;
 static char   linkmodal_url[1024] = {0};
@@ -325,7 +332,7 @@ static float plain_prefix_width(const char* s, int n) {
 	if(n > 255) n = 255;
 	memcpy(buf, s, n);
 	buf[n] = 0;
-	return font_length((float)CHATLOG_TEXT_HEIGHT, buf);
+	return font_length((float)chatlog_text_height(), buf);
 }
 
 static int plain_char_at_offset(const char* plain, int plain_len, float rel_x) {
@@ -422,7 +429,7 @@ static void ctxmenu_show_copy(int x, int y) {
 	ctxmenu_payload[0] = 0;
 
 	int max_x = settings.window_width - CTXMENU_W - 4;
-	int max_y = settings.window_height - CTXMENU_H - 4;
+	int max_y = settings.window_height - ctxmenu_height() - 4;
 	if(x > max_x) x = max_x;
 	if(y > max_y) y = max_y;
 	if(x < 0) x = 0;
@@ -430,14 +437,14 @@ static void ctxmenu_show_copy(int x, int y) {
 
 	ctxmenu_x = x;
 	ctxmenu_y = y;
-	ctxmenu_rect = mu_rect(x, y, CTXMENU_W, CTXMENU_H);
+	ctxmenu_rect = mu_rect(x, y, CTXMENU_W, ctxmenu_height());
 	ctxmenu_visible = 1;
 }
 
 /* Width sized to the label (with horizontal padding) so longer payloads
    like "Show only messages from <long_name>" don't get clipped. */
 static int ctxmenu_label_width(const char* label) {
-	int w = (int)font_length((float)CHATLOG_TEXT_HEIGHT, (char*)label) + 24;
+	int w = (int)font_length((float)chatlog_text_height(), (char*)label) + 24;
 	if(w < CTXMENU_W) w = CTXMENU_W;
 	return w;
 }
@@ -453,7 +460,7 @@ static void ctxmenu_show_filter(int x, int y, const char* name) {
 
 	int w = ctxmenu_label_width(ctxmenu_label);
 	int max_x = settings.window_width - w - 4;
-	int max_y = settings.window_height - CTXMENU_H - 4;
+	int max_y = settings.window_height - ctxmenu_height() - 4;
 	if(x > max_x) x = max_x;
 	if(y > max_y) y = max_y;
 	if(x < 0) x = 0;
@@ -461,7 +468,7 @@ static void ctxmenu_show_filter(int x, int y, const char* name) {
 
 	ctxmenu_x = x;
 	ctxmenu_y = y;
-	ctxmenu_rect = mu_rect(x, y, w, CTXMENU_H);
+	ctxmenu_rect = mu_rect(x, y, w, ctxmenu_height());
 	ctxmenu_visible = 1;
 }
 
@@ -471,7 +478,7 @@ static void ctxmenu_show_filter_clear(int x, int y) {
 	ctxmenu_kind = CTXMENU_KIND_FILTER_CLEAR;
 
 	int max_x = settings.window_width - CTXMENU_W - 4;
-	int max_y = settings.window_height - CTXMENU_H - 4;
+	int max_y = settings.window_height - ctxmenu_height() - 4;
 	if(x > max_x) x = max_x;
 	if(y > max_y) y = max_y;
 	if(x < 0) x = 0;
@@ -479,7 +486,7 @@ static void ctxmenu_show_filter_clear(int x, int y) {
 
 	ctxmenu_x = x;
 	ctxmenu_y = y;
-	ctxmenu_rect = mu_rect(x, y, CTXMENU_W, CTXMENU_H);
+	ctxmenu_rect = mu_rect(x, y, CTXMENU_W, ctxmenu_height());
 	ctxmenu_visible = 1;
 }
 
@@ -490,7 +497,7 @@ static void ctxmenu_show_select_all(int x, int y) {
 	ctxmenu_kind = CTXMENU_KIND_SELECT_ALL;
 
 	int max_x = settings.window_width - CTXMENU_W - 4;
-	int max_y = settings.window_height - CTXMENU_H - 4;
+	int max_y = settings.window_height - ctxmenu_height() - 4;
 	if(x > max_x) x = max_x;
 	if(y > max_y) y = max_y;
 	if(x < 0) x = 0;
@@ -498,7 +505,7 @@ static void ctxmenu_show_select_all(int x, int y) {
 
 	ctxmenu_x = x;
 	ctxmenu_y = y;
-	ctxmenu_rect = mu_rect(x, y, CTXMENU_W, CTXMENU_H);
+	ctxmenu_rect = mu_rect(x, y, CTXMENU_W, ctxmenu_height());
 	ctxmenu_visible = 1;
 }
 
@@ -578,32 +585,84 @@ static void ctxmenu_render(mu_Context* ctx) {
 	if(hover)
 		mu_draw_rect(ctx, mu_rect(ctxmenu_rect.x + 1, ctxmenu_rect.y + 1,
 								  ctxmenu_rect.w - 2, ctxmenu_rect.h - 2), hov);
+	int th = ctx->text_height(ctx->style->font);
 	mu_draw_text(ctx, ctx->style->font, ctxmenu_label, -1,
-				 mu_vec2(ctxmenu_rect.x + 8, ctxmenu_rect.y + 6), fg);
+				 mu_vec2(ctxmenu_rect.x + 8, ctxmenu_rect.y + (ctxmenu_rect.h - th) / 2), fg);
 }
 
 static int linkmodal_hit(mu_Rect r, int mx, int my) {
 	return mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
 }
 
-static void linkmodal_layout(void) {
-	int x = settings.window_width  / 2 - LINKMODAL_W / 2;
-	int y = settings.window_height / 2 - LINKMODAL_H / 2;
-	linkmodal_rect = mu_rect(x, y, LINKMODAL_W, LINKMODAL_H);
+static const char* LINKMODAL_TITLE = "Open external link?";
+static const char* LINKMODAL_WARN1 = "This may be unsafe.";
+static const char* LINKMODAL_WARN2 = "Make sure you trust the destination.";
+static char linkmodal_preview[160];
 
-	int btn_w = 140, btn_h = 32, gap = 16;
-	int by = y + LINKMODAL_H - btn_h - 16;
-	int bx_visit  = x + LINKMODAL_W / 2 - btn_w - gap / 2;
-	int bx_cancel = x + LINKMODAL_W / 2 + gap / 2;
-	linkmodal_visit_btn  = mu_rect(bx_visit,  by, btn_w, btn_h);
-	linkmodal_cancel_btn = mu_rect(bx_cancel, by, btn_w, btn_h);
+/* All metrics are derived from the font so the dialog scales with
+   hud_ui_scale() and wide fonts can't overflow the box or the buttons. */
+static void linkmodal_layout(mu_Context* ctx) {
+	int th  = ctx->text_height(ctx->style->font);
+	int pad = th;
+	int gap = th / 2;
+
+	int btn_h   = th + gap;
+	int btn_w_v = ctx->text_width(ctx->style->font, "Visit website", 0) + 2 * gap;
+	int btn_w_c = ctx->text_width(ctx->style->font, "Cancel", 0) + 2 * gap;
+
+	int w = ctx->text_width(ctx->style->font, LINKMODAL_TITLE, 0);
+	int t = ctx->text_width(ctx->style->font, LINKMODAL_WARN1, 0);
+	if(t > w) w = t;
+	t = ctx->text_width(ctx->style->font, LINKMODAL_WARN2, 0);
+	if(t > w) w = t;
+	if(btn_w_v + gap + btn_w_c > w) w = btn_w_v + gap + btn_w_c;
+	w += 2 * pad;
+	int max_w = settings.window_width * 92 / 100;
+	if(w > max_w) w = max_w;
+
+	/* URL preview: copy as much as fits the inner width, else truncate
+	   with a trailing "..." */
+	int inner = w - 2 * pad;
+	int n = 0, full = strlen(linkmodal_url);
+	while(n < full && n < (int)sizeof(linkmodal_preview) - 4) {
+		linkmodal_preview[n] = linkmodal_url[n];
+		linkmodal_preview[n + 1] = 0;
+		if(ctx->text_width(ctx->style->font, linkmodal_preview, 0) > inner)
+			break;
+		n++;
+	}
+	linkmodal_preview[n] = 0;
+	if(n < full) {
+		while(n > 0
+			  && ctx->text_width(ctx->style->font, linkmodal_preview, 0)
+				  + ctx->text_width(ctx->style->font, "...", 0) > inner) {
+			linkmodal_preview[--n] = 0;
+		}
+		strcat(linkmodal_preview, "...");
+	}
+
+	/* title + 2 warning lines + url line + button row, gap-separated */
+	int h = pad + th + gap + th + th + gap + th + pad + btn_h + pad;
+
+	int x = settings.window_width / 2 - w / 2;
+	int y = settings.window_height / 2 - h / 2;
+	linkmodal_rect = mu_rect(x, y, w, h);
+
+	int by = y + h - btn_h - pad;
+	int bx_visit  = x + w / 2 - (btn_w_v + gap + btn_w_c) / 2;
+	int bx_cancel = bx_visit + btn_w_v + gap;
+	linkmodal_visit_btn  = mu_rect(bx_visit,  by, btn_w_v, btn_h);
+	linkmodal_cancel_btn = mu_rect(bx_cancel, by, btn_w_c, btn_h);
 }
 
 static void linkmodal_render(mu_Context* ctx) {
 	if(!linkmodal_visible) return;
-	linkmodal_layout();
+	linkmodal_layout(ctx);
 
 	int mx = ctx->mouse_pos.x, my = ctx->mouse_pos.y;
+	int th  = ctx->text_height(ctx->style->font);
+	int pad = th;
+	int gap = th / 2;
 
 	mu_draw_rect(ctx, mu_rect(0, 0, settings.window_width, settings.window_height),
 				 mu_color(0, 0, 0, 140));
@@ -614,22 +673,18 @@ static void linkmodal_render(mu_Context* ctx) {
 	mu_Color fg   = mu_color(230, 230, 230, 255);
 	mu_Color warn = mu_color(220, 190, 80, 255);
 
-	mu_draw_text(ctx, ctx->style->font,
-				 "Open external link?", -1,
-				 mu_vec2(linkmodal_rect.x + 16, linkmodal_rect.y + 14), fg);
-	mu_draw_text(ctx, ctx->style->font,
-				 "This may be unsafe. Make sure you trust the destination.", -1,
-				 mu_vec2(linkmodal_rect.x + 16, linkmodal_rect.y + 36), warn);
-
-	char preview[160];
-	int preview_max = (int)sizeof(preview) - 4;
-	int n = 0;
-	for(int i = 0; linkmodal_url[i] && n < preview_max; i++) preview[n++] = linkmodal_url[i];
-	int truncated = (linkmodal_url[n] != 0);
-	preview[n] = 0;
-	if(truncated) strcat(preview, "...");
-	mu_draw_text(ctx, ctx->style->font, preview, -1,
-				 mu_vec2(linkmodal_rect.x + 16, linkmodal_rect.y + 62), fg);
+	int ty = linkmodal_rect.y + pad;
+	mu_draw_text(ctx, ctx->style->font, LINKMODAL_TITLE, -1,
+				 mu_vec2(linkmodal_rect.x + pad, ty), fg);
+	ty += th + gap;
+	mu_draw_text(ctx, ctx->style->font, LINKMODAL_WARN1, -1,
+				 mu_vec2(linkmodal_rect.x + pad, ty), warn);
+	ty += th;
+	mu_draw_text(ctx, ctx->style->font, LINKMODAL_WARN2, -1,
+				 mu_vec2(linkmodal_rect.x + pad, ty), warn);
+	ty += th + gap;
+	mu_draw_text(ctx, ctx->style->font, linkmodal_preview, -1,
+				 mu_vec2(linkmodal_rect.x + pad, ty), fg);
 
 	int hov_visit  = linkmodal_hit(linkmodal_visit_btn,  mx, my);
 	int hov_cancel = linkmodal_hit(linkmodal_cancel_btn, mx, my);
@@ -649,7 +704,6 @@ static void linkmodal_render(mu_Context* ctx) {
 
 	int tw_v = ctx->text_width(ctx->style->font, "Visit website", 0);
 	int tw_c = ctx->text_width(ctx->style->font, "Cancel", 0);
-	int th   = ctx->text_height(ctx->style->font);
 	mu_draw_text(ctx, ctx->style->font, "Visit website", -1,
 				 mu_vec2(linkmodal_visit_btn.x + (linkmodal_visit_btn.w - tw_v) / 2,
 						 linkmodal_visit_btn.y + (linkmodal_visit_btn.h - th) / 2), fg);
@@ -1315,7 +1369,7 @@ static void search_render_bar(mu_Context* ctx, mu_Rect bar) {
 		mu_draw_text(ctx, ctx->style->font, search_query, search_query_len,
 					 mu_vec2(x, text_y), qc);
 		mu_pop_clip_rect(ctx);
-		float qw = font_length((float)CHATLOG_TEXT_HEIGHT, search_query);
+		float qw = font_length((float)chatlog_text_height(), search_query);
 		int caret_x = x + (int)qw + 1;
 		if(caret_x > query_max_x - 2) caret_x = query_max_x - 2;
 		mu_draw_rect(ctx, mu_rect(caret_x, bar.y + 5, 1, bar.h - 10), fg);
@@ -1424,7 +1478,7 @@ static int search_handle_click(int mx, int my) {
 static void render_chat_line(mu_Context* ctx, int line_index) {
 	struct visible_line* vl = &lines[line_index];
 
-	mu_layout_row(ctx, 1, (int[]) { -1 }, CHATLOG_TEXT_HEIGHT);
+	mu_layout_row(ctx, 1, (int[]) { -1 }, chatlog_text_height());
 	mu_Rect r = mu_layout_next(ctx);
 	vl->rect = r;
 
@@ -1742,7 +1796,7 @@ static void hud_chatlog_render(mu_Context* ctx, float scalex, float scaley) {
 		   from chathistory (lines prepended at the top). Live additions
 		   land at the bottom and require no scroll adjustment. */
 		if(cur_hc > prev_hc && prev_count > 0) {
-			int added_h = (line_count - prev_count) * CHATLOG_TEXT_HEIGHT;
+			int added_h = (line_count - prev_count) * chatlog_text_height();
 			(void)prev_content_h;
 			if(added_h > 0) panel->scroll.y += added_h;
 			/* Selection indices are positional; prepending invalidates them. */
@@ -1787,7 +1841,7 @@ static void hud_chatlog_render(mu_Context* ctx, float scalex, float scaley) {
 		}
 
 		if(line_count == 0 && chathistory_count() == 0) {
-			mu_layout_row(ctx, 1, (int[]) { -1 }, CHATLOG_TEXT_HEIGHT * 2);
+			mu_layout_row(ctx, 1, (int[]) { -1 }, chatlog_text_height() * 2);
 			mu_Rect empty = mu_layout_next(ctx);
 			mu_draw_text(ctx, ctx->style->font,
 						 "No messages yet.", -1,

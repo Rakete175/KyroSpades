@@ -74,6 +74,7 @@ extern struct texture texture_ui_knob;
 
 #define TEXTURE_FILTER_NEAREST 0
 #define TEXTURE_FILTER_LINEAR 1
+#define TEXTURE_WRAP_CLAMP 2
 
 int texture_flag_index(const char* country);
 void texture_flag_offset(int index, float* u, float* v);

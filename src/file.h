@@ -25,6 +25,7 @@ void file_printf(void* file, const char* fmt, ...);
 void file_close(void* file);
 int file_size(const char* name);
 int file_dir_exists(const char* path);
+int file_dir_list(const char* path, void (*cb)(const char* name, void* user), void* user);
 int file_dir_create(const char* path);
 int file_exists(const char* name);
 unsigned char* file_load(const char* name);

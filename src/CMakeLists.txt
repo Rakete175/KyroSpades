@@ -54,6 +54,13 @@ if(ENABLE_SDL)
 		set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 		set(SDL_STATIC ON  CACHE BOOL "" FORCE)
 		set(SDL_TEST   OFF CACHE BOOL "" FORCE)
+		# Android: disable HIDAPI — its hid.cpp requires C++ runtime which a
+		# pure-C executable doesn't link. Android's native joystick API is used
+		# as fallback and works fine for a touch/gamepad game.
+		if(ANDROID)
+			set(SDL_HIDAPI          OFF CACHE BOOL "" FORCE)
+			set(SDL_HIDAPI_JOYSTICK OFF CACHE BOOL "" FORCE)
+		endif()
 		FetchContent_MakeAvailable(SDL2)
 		set(SDL2_USE_FETCHCONTENT TRUE)
 	endif()
@@ -138,13 +145,27 @@ list(APPEND CLIENT_SOURCES microui.c)
 list(APPEND CLIENT_SOURCES channel.c)
 list(APPEND CLIENT_SOURCES entitysystem.c)
 list(APPEND CLIENT_SOURCES demo.c)
-list(APPEND CLIENT_SOURCES ${KyroSpades_SOURCE_DIR}/resources/icon.rc)
+# icon.rc is a Windows resource file — skip it on non-Windows platforms
+if(WIN32)
+	list(APPEND CLIENT_SOURCES ${KyroSpades_SOURCE_DIR}/resources/icon.rc)
+endif()
 
-add_executable(client ${CLIENT_SOURCES})
+# ── Target: shared library on Android, executable everywhere else ─────────────
+# SDLActivity.java calls System.loadLibrary("main") which expects libmain.so.
+# On all other platforms we keep the original executable target named "client".
+if(ANDROID)
+	add_library(main SHARED ${CLIENT_SOURCES})
+	set(KS_TARGET main)
+else()
+	add_executable(client ${CLIENT_SOURCES})
+	set(KS_TARGET client)
+endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-	set_property(TARGET client PROPERTY WIN32_EXECUTABLE true)
-	target_compile_definitions(client PRIVATE NDEBUG)
+	if(NOT ANDROID)
+		set_property(TARGET ${KS_TARGET} PROPERTY WIN32_EXECUTABLE true)
+	endif()
+	target_compile_definitions(${KS_TARGET} PRIVATE NDEBUG)
 endif()
 
 set(GIT_COMMIT_HASH "?")
@@ -159,178 +180,204 @@ execute_process(
 include(CheckIPOSupported)
 check_ipo_supported(RESULT lto_supported OUTPUT error)
 
-if(lto_supported)
+if(lto_supported AND NOT ANDROID)
 	message(STATUS "IPO / LTO enabled")
-	set_property(TARGET client PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+	set_property(TARGET ${KS_TARGET} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 else()
 	message(STATUS "IPO / LTO not supported: <${error}>")
 endif()
 
-target_compile_definitions(client PRIVATE GIT_COMMIT_HASH="${GIT_COMMIT_HASH}")
-target_compile_definitions(client PRIVATE DR_WAV_IMPLEMENTATION)
-target_compile_definitions(client PRIVATE LOG_USE_COLOR)
+target_compile_definitions(${KS_TARGET} PRIVATE GIT_COMMIT_HASH="${GIT_COMMIT_HASH}")
+target_compile_definitions(${KS_TARGET} PRIVATE DR_WAV_IMPLEMENTATION)
+target_compile_definitions(${KS_TARGET} PRIVATE LOG_USE_COLOR)
 
 if(ENABLE_TOUCH)
-	target_compile_definitions(client PRIVATE USE_TOUCH)
+	target_compile_definitions(${KS_TARGET} PRIVATE USE_TOUCH)
 endif()
 if(ENABLE_ANDROID_FILE)
-	target_compile_definitions(client PRIVATE USE_ANDROID_FILE)
+	target_compile_definitions(${KS_TARGET} PRIVATE USE_ANDROID_FILE)
 endif()
 
-target_compile_definitions(client PRIVATE KYROSPADES_MAJOR=${KYROSPADES_MAJOR})
-target_compile_definitions(client PRIVATE KYROSPADES_MINOR=${KYROSPADES_MINOR})
-target_compile_definitions(client PRIVATE KYROSPADES_PATCH=${KYROSPADES_PATCH})
-target_compile_definitions(client PRIVATE KYROSPADES_VERSION="v${KYROSPADES_MAJOR}.${KYROSPADES_MINOR}.${KYROSPADES_PATCH}")
+target_compile_definitions(${KS_TARGET} PRIVATE KYROSPADES_MAJOR=${KYROSPADES_MAJOR})
+target_compile_definitions(${KS_TARGET} PRIVATE KYROSPADES_MINOR=${KYROSPADES_MINOR})
+target_compile_definitions(${KS_TARGET} PRIVATE KYROSPADES_PATCH=${KYROSPADES_PATCH})
+target_compile_definitions(${KS_TARGET} PRIVATE KYROSPADES_VERSION="v${KYROSPADES_MAJOR}.${KYROSPADES_MINOR}.${KYROSPADES_PATCH}")
 
+if(NOT ANDROID)
+	set_target_properties(
+		${KS_TARGET} PROPERTIES
+		RUNTIME_OUTPUT_DIRECTORY ${KyroSpades_SOURCE_DIR}/build/KyroSpades
+	)
+endif()
 
-set_target_properties(
-	client PROPERTIES
-	RUNTIME_OUTPUT_DIRECTORY ${KyroSpades_SOURCE_DIR}/build/KyroSpades
-	C_STANDARD 99
-)
+set_target_properties(${KS_TARGET} PROPERTIES C_STANDARD 99)
 
 set(CMAKE_PREFIX_PATH  ${CMAKE_PREFIX_PATH} ${KyroSpades_SOURCE_DIR}/deps)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${KyroSpades_SOURCE_DIR}/cmake/Modules)
 set(OpenGL_GL_PREFERENCE LEGACY)
+
 if(ENABLE_GLFW)
 	find_package(glfw3 REQUIRED)
-	target_link_libraries(client glfw3::glfw3)
-	target_compile_definitions(client PRIVATE USE_GLFW)
+	target_link_libraries(${KS_TARGET} glfw3::glfw3)
+	target_compile_definitions(${KS_TARGET} PRIVATE USE_GLFW)
 endif()
+
 if(ENABLE_SDL)
 	if(SDL2_USE_FETCHCONTENT)
-		# Static target from FetchContent build; includes macOS frameworks automatically
-		target_link_libraries(client SDL2::SDL2-static)
+		target_link_libraries(${KS_TARGET} SDL2::SDL2-static)
 	elseif(TARGET SDL2::SDL2)
-		# Modern cmake config from brew/MacPorts
-		target_link_libraries(client SDL2::SDL2)
+		target_link_libraries(${KS_TARGET} SDL2::SDL2)
 	else()
-		# Legacy FindSDL2 module fallback (older cmake, no imported targets)
-		target_link_libraries(client ${SDL2_LIBRARIES})
-		target_include_directories(client PRIVATE ${SDL2_INCLUDE_DIRS})
+		target_link_libraries(${KS_TARGET} ${SDL2_LIBRARIES})
+		target_include_directories(${KS_TARGET} PRIVATE ${SDL2_INCLUDE_DIRS})
 	endif()
-	target_compile_definitions(client PRIVATE USE_SDL)
+	target_compile_definitions(${KS_TARGET} PRIVATE USE_SDL)
 endif()
+
 if(ENABLE_SOUND)
 	find_package(OpenAL REQUIRED)
-	target_link_libraries(client ${OPENAL_LIBRARY})
-	target_compile_definitions(client PRIVATE USE_SOUND)
+	target_link_libraries(${KS_TARGET} ${OPENAL_LIBRARY})
+	if(ANDROID)
+		# Static openal-soft is C++ and uses the OpenSL ES backend + logcat.
+		# Our target is pure C, so none of these get pulled in implicitly.
+		target_link_libraries(${KS_TARGET} OpenSLES log c++_static c++abi)
+	endif()
+	target_compile_definitions(${KS_TARGET} PRIVATE USE_SOUND)
 endif()
+
 find_package(enet REQUIRED)
 find_package(deflate REQUIRED)
 find_package(Threads REQUIRED)
-if(NOT ENABLE_OPENGLES)
+
+# ── OpenGL / OpenGL ES ────────────────────────────────────────────────────────
+if(ANDROID)
+	# On Android, EGL and GLESv2 are system libraries provided by the NDK.
+	# CMake's built-in FindOpenGL doesn't understand this, so we define the
+	# imported targets directly instead of calling find_package(OpenGL).
+	if(NOT TARGET OpenGL::EGL)
+		add_library(OpenGL::EGL INTERFACE IMPORTED GLOBAL)
+		set_target_properties(OpenGL::EGL PROPERTIES INTERFACE_LINK_LIBRARIES "EGL")
+	endif()
+	if(NOT TARGET OpenGL::OpenGL)
+		add_library(OpenGL::OpenGL INTERFACE IMPORTED GLOBAL)
+		set_target_properties(OpenGL::OpenGL PROPERTIES INTERFACE_LINK_LIBRARIES "GLESv2")
+	endif()
+	set(OPENGL_FOUND TRUE)
+	set(OPENGL_LIBRARIES "GLESv2")
+	set(OPENGL_INCLUDE_DIR "")
+	set(OPENGL_EGL_INCLUDE_DIRS "")
+	target_link_libraries(${KS_TARGET} OpenGL::EGL)
+	# libandroid provides the AAssetManager API used by file_dir_list() to
+	# enumerate APK assets (random menu backgrounds). SDL links it for its own
+	# use, but our libmain.so references the symbols directly and needs it too.
+	target_link_libraries(${KS_TARGET} android)
+	target_compile_definitions(${KS_TARGET} PRIVATE OPENGL_ES)
+elseif(NOT ENABLE_OPENGLES)
 	find_package(OpenGL REQUIRED)
 	find_package(GLEW REQUIRED)
-	target_link_libraries(client GLEW::GLEW)
+	target_link_libraries(${KS_TARGET} GLEW::GLEW)
 else()
 	find_package(OpenGL REQUIRED COMPONENTS EGL)
-	target_link_libraries(client OpenGL::EGL)
-	target_compile_definitions(client PRIVATE OPENGL_ES)
+	target_link_libraries(${KS_TARGET} OpenGL::EGL)
+	target_compile_definitions(${KS_TARGET} PRIVATE OPENGL_ES)
 endif()
+
 if(ENABLE_RPC)
-	target_link_libraries(client discord-rpc stdc++)
-	target_compile_definitions(client PRIVATE USE_RPC DISCORD_DISABLE_IO_THREAD)
+	target_link_libraries(${KS_TARGET} discord-rpc stdc++)
+	target_compile_definitions(${KS_TARGET} PRIVATE USE_RPC DISCORD_DISABLE_IO_THREAD)
 endif()
 if(DEFINED ENV{BUILD_NUMBER})
-	target_compile_definitions(client PRIVATE JENKINS_BUILD="$ENV{BUILD_NUMBER}")
+	target_compile_definitions(${KS_TARGET} PRIVATE JENKINS_BUILD="$ENV{BUILD_NUMBER}")
 endif()
-
 
 if(WIN32)
-	target_compile_definitions(client PRIVATE LIBDEFLATE_STATIC)
+	target_compile_definitions(${KS_TARGET} PRIVATE LIBDEFLATE_STATIC)
 endif()
 
-target_link_libraries(client ${CMAKE_THREAD_LIBS_INIT} ${OPENGL_LIBRARIES} enet::enet deflate::deflate m cglm vxl)
-target_include_directories(client PRIVATE ${OPENAL_INCLUDE_DIRS} ${OPENGL_INCLUDE_DIR} ${OPENGL_EGL_INCLUDE_DIRS})
+target_link_libraries(${KS_TARGET} ${CMAKE_THREAD_LIBS_INIT} ${OPENGL_LIBRARIES} enet::enet deflate::deflate m cglm vxl)
+target_include_directories(${KS_TARGET} PRIVATE ${OPENAL_INCLUDE_DIR} ${OPENAL_INCLUDE_DIRS} ${OPENGL_INCLUDE_DIR} ${OPENGL_EGL_INCLUDE_DIRS})
 
-add_custom_command(
-	TARGET client
-	POST_BUILD
-	COMMENT "Copying resources..."
-	COMMAND ${CMAKE_COMMAND} -E copy_directory ${KyroSpades_SOURCE_DIR}/resources ${KyroSpades_SOURCE_DIR}/build/KyroSpades
-)
+# ── Post-build resource copy (desktop only) ───────────────────────────────────
+# On Android, resources are packaged as APK assets by Gradle — no post-build
+# copy needed and the paths wouldn't exist in the Gradle build environment.
+if(NOT ANDROID)
+	add_custom_command(
+		TARGET ${KS_TARGET}
+		POST_BUILD
+		COMMENT "Copying resources..."
+		COMMAND ${CMAKE_COMMAND} -E copy_directory ${KyroSpades_SOURCE_DIR}/resources ${KyroSpades_SOURCE_DIR}/build/KyroSpades
+	)
 
-add_custom_command(
-	TARGET client
-	POST_BUILD
-	COMMENT "Extracting additional third-party assets..."
-	DEPENDS ${KyroSpades_SOURCE_DIR}/bsresources.zip
-	WORKING_DIRECTORY ${KyroSpades_SOURCE_DIR}/build/KyroSpades
-	COMMAND ${CMAKE_COMMAND} -E tar xzf ${KyroSpades_SOURCE_DIR}/bsresources.zip
-)
+	add_custom_command(
+		TARGET ${KS_TARGET}
+		POST_BUILD
+		COMMENT "Extracting additional third-party assets..."
+		DEPENDS ${KyroSpades_SOURCE_DIR}/bsresources.zip
+		WORKING_DIRECTORY ${KyroSpades_SOURCE_DIR}/build/KyroSpades
+		COMMAND ${CMAKE_COMMAND} -E tar xzf ${KyroSpades_SOURCE_DIR}/bsresources.zip
+	)
 
-add_custom_command(
-	TARGET client
-	POST_BUILD
-	COMMENT "Copying overrides..."
-	COMMAND ${CMAKE_COMMAND} -E copy_directory ${KyroSpades_SOURCE_DIR}/resources.override ${KyroSpades_SOURCE_DIR}/build/KyroSpades
-)
+	add_custom_command(
+		TARGET ${KS_TARGET}
+		POST_BUILD
+		COMMENT "Copying overrides..."
+		COMMAND ${CMAKE_COMMAND} -E copy_directory ${KyroSpades_SOURCE_DIR}/resources.override ${KyroSpades_SOURCE_DIR}/build/KyroSpades
+	)
 
-install(
-	TARGETS client
-	RUNTIME
-	DESTINATION .
-)
+	install(
+		TARGETS ${KS_TARGET}
+		RUNTIME
+		DESTINATION .
+	)
 
-install(
-	FILES "${CMAKE_BINARY_DIR}/KyroSpades/config.ini" "${CMAKE_BINARY_DIR}/KyroSpades/OpenAL32.dll"
-	DESTINATION .
-	PERMISSIONS	OWNER_EXECUTE OWNER_WRITE OWNER_READ
-				GROUP_EXECUTE GROUP_READ
-)
+	install(
+		FILES "${CMAKE_BINARY_DIR}/KyroSpades/config.ini" "${CMAKE_BINARY_DIR}/KyroSpades/OpenAL32.dll"
+		DESTINATION .
+		PERMISSIONS	OWNER_EXECUTE OWNER_WRITE OWNER_READ
+					GROUP_EXECUTE GROUP_READ
+	)
 
-install(
-	DIRECTORY "${CMAKE_BINARY_DIR}/KyroSpades/fonts"
-	DESTINATION .
-	FILES_MATCHING PATTERN "*.ttf"
-)
+	install(
+		DIRECTORY "${CMAKE_BINARY_DIR}/KyroSpades/fonts"
+		DESTINATION .
+		FILES_MATCHING PATTERN "*.ttf"
+	)
 
-install(
-	DIRECTORY "${CMAKE_BINARY_DIR}/KyroSpades/kv6"
-	DESTINATION .
-	FILES_MATCHING PATTERN "*.kv6"
-)
+	install(
+		DIRECTORY "${CMAKE_BINARY_DIR}/KyroSpades/kv6"
+		DESTINATION .
+		FILES_MATCHING PATTERN "*.kv6"
+	)
 
-install(
-	DIRECTORY "${CMAKE_BINARY_DIR}/KyroSpades/png"
-	DESTINATION .
-	FILES_MATCHING PATTERN "*.png"
-)
+	install(
+		DIRECTORY "${CMAKE_BINARY_DIR}/KyroSpades/png"
+		DESTINATION .
+		FILES_MATCHING PATTERN "*.png"
+	)
 
-install(
-	DIRECTORY "${CMAKE_BINARY_DIR}/KyroSpades/wav"
-	DESTINATION .
-	FILES_MATCHING PATTERN "*.wav"
-)
+	install(
+		DIRECTORY "${CMAKE_BINARY_DIR}/KyroSpades/wav"
+		DESTINATION .
+		FILES_MATCHING PATTERN "*.wav"
+	)
 
-install(
-	DIRECTORY
-	DESTINATION "cache"
-)
+	install(DIRECTORY DESTINATION "cache")
+	install(DIRECTORY DESTINATION "logs")
+	install(DIRECTORY DESTINATION "screenshots")
 
-install(
-	DIRECTORY
-	DESTINATION "logs"
-)
+	set(CPACK_GENERATOR NSIS)
+	set(CPACK_PACKAGE_NAME "KyroSpades")
+	set(CPACK_PACKAGE_VENDOR "github.com")
+	set(CPACK_PACKAGE_VERSION "v${KYROSPADES_MAJOR}.${KYROSPADES_MINOR}.${KYROSPADES_PATCH}")
+	set(CPACK_PACKAGE_VERSION_MAJOR "${KYROSPADES_MAJOR}")
+	set(CPACK_PACKAGE_VERSION_MINOR "${KYROSPADES_MINOR}")
+	set(CPACK_PACKAGE_VERSION_PATCH "${KYROSPADES_PATCH}")
+	set(CPACK_PACKAGE_INSTALL_DIRECTORY "${CPACK_PACKAGE_NAME}")
+	set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+	set(CPACK_STRIP_FILES TRUE)
+	set(CPACK_NSIS_MENU_LINKS "client" "KyroSpades")
+	set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+	set(CPACK_PACKAGE_CHECKSUM SHA256)
 
-install(
-	DIRECTORY
-	DESTINATION "screenshots"
-)
-
-set(CPACK_GENERATOR NSIS)
-set(CPACK_PACKAGE_NAME "KyroSpades")
-set(CPACK_PACKAGE_VENDOR "github.com")
-set(CPACK_PACKAGE_VERSION "v${KYROSPADES_MAJOR}.${KYROSPADES_MINOR}.${KYROSPADES_PATCH}")
-set(CPACK_PACKAGE_VERSION_MAJOR "${KYROSPADES_MAJOR}")
-set(CPACK_PACKAGE_VERSION_MINOR "${KYROSPADES_MINOR}")
-set(CPACK_PACKAGE_VERSION_PATCH "${KYROSPADES_PATCH}")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY "${CPACK_PACKAGE_NAME}")
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
-set(CPACK_STRIP_FILES TRUE)
-set(CPACK_NSIS_MENU_LINKS "client" "KyroSpades")
-set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
-set(CPACK_PACKAGE_CHECKSUM SHA256)
-
-INCLUDE(CPack)
+	INCLUDE(CPack)
+endif()
