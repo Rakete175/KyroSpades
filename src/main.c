@@ -1094,7 +1094,11 @@ int main(int argc, char** argv) {
 	settings.player_arms = 0;
 	settings.fullscreen = 0;
 	settings.greedy_meshing = 0;
-	settings.mouse_sensitivity = MOUSE_SENSITIVITY;
+	/* The look formula is `setting / 5.0F * MOUSE_SENSITIVITY`, so the
+	   neutral value of this setting is 5 — NOT the raw radians/pixel
+	   constant MOUSE_SENSITIVITY (0.002), which would render the camera
+	   effectively frozen. */
+	settings.mouse_sensitivity = 5.0F;
 	settings.show_news = 1;
 	settings.show_fps = 0;
 	settings.volume = 10;
