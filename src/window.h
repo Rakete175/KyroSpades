@@ -122,9 +122,14 @@ struct window_finger {
 #endif
 	float down_time;
 	int full;
+	int dragged;
+	int long_pressed;
 	struct {
 		float x, y;
 	} start;
+	struct {
+		float x, y;
+	} cur;
 };
 
 extern int window_pressed_keys[64];

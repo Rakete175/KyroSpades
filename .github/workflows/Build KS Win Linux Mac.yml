@@ -23,9 +23,14 @@ jobs:
 
       - name: Sync upstream KyroSpades
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/Kyrope01/KyroSpades.git || true
           git fetch upstream
-          git merge upstream/main --no-edit || true
+          if ! git merge upstream/main --no-edit; then
+            echo "::warning::Upstream merge failed (diverged history / conflicts) — building WITHOUT latest upstream changes."
+            git merge --abort || true
+          fi
         shell: bash
 
       - name: Cache CMake dependencies
@@ -170,11 +175,6 @@ jobs:
       - name: Apply macOS fixes
         if: matrix.platform == 'macos'
         run: |
-          # macOS lacks pthread_spinlock_t; replace with pthread_mutex_t
-          sed -i '' 's/pthread_spinlock_t/pthread_mutex_t/g' src/chunk.c
-          sed -i '' 's/pthread_spin_init(&chunk_block_queue_lock, PTHREAD_PROCESS_PRIVATE)/pthread_mutex_init(\&chunk_block_queue_lock, NULL)/' src/chunk.c
-          sed -i '' 's/pthread_spin_lock/pthread_mutex_lock/g' src/chunk.c
-          sed -i '' 's/pthread_spin_unlock/pthread_mutex_unlock/g' src/chunk.c
           # Fix abs() on float values in camera.c
           sed -i '' 's/int xr = abs(errx)/int xr = (int)fabsf(errx)/' src/camera.c
           sed -i '' 's/int yr = abs(erry)/int yr = (int)fabsf(erry)/' src/camera.c
@@ -217,9 +217,147 @@ jobs:
           name: ${{ matrix.platform }}-build
           path: build/*.zip
 
+  build-android:
+    name: Build for Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout your fork
+        uses: actions/checkout@v4
+
+      - name: Sync upstream KyroSpades
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/Kyrope01/KyroSpades.git || true
+          git fetch upstream
+          if ! git merge upstream/main --no-edit; then
+            echo "::warning::Upstream merge failed (diverged history / conflicts) — building WITHOUT latest upstream changes."
+            git merge --abort || true
+          fi
+        shell: bash
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android NDK + CMake
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Cache Android native deps
+        uses: actions/cache@v4
+        with:
+          path: build-android/deps-install
+          key: android-arm64-api21-enet1.3.18-libdeflate1.20-openal1.23.1
+
+      - name: Build native deps (enet + libdeflate)
+        run: |
+          set -euo pipefail
+          NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          DEPS="$GITHUB_WORKSPACE/build-android/deps-install"
+          mkdir -p "$DEPS/lib" "$DEPS/include"
+          COMMON="-DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+                  -DANDROID_ABI=arm64-v8a \
+                  -DANDROID_PLATFORM=android-21 \
+                  -DANDROID_STL=c++_static \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_INSTALL_PREFIX=$DEPS \
+                  -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+
+          # enet (static)
+          if [ ! -f "$DEPS/lib/libenet.a" ]; then
+            curl -L -o enet.tar.gz https://github.com/lsalzman/enet/archive/refs/tags/v1.3.18.tar.gz
+            tar xzf enet.tar.gz
+            cmake -S enet-1.3.18 -B enet-build $COMMON
+            cmake --build enet-build --parallel
+            find enet-build -name 'libenet.a' -exec cp {} "$DEPS/lib/" \;
+            cp -r enet-1.3.18/include/enet "$DEPS/include/"
+          fi
+
+          # libdeflate (static)
+          if [ ! -f "$DEPS/lib/libdeflate.a" ]; then
+            curl -L -o libdeflate.tar.gz https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.20.tar.gz
+            tar xzf libdeflate.tar.gz
+            cmake -S libdeflate-1.20 -B libdeflate-build $COMMON \
+                  -DLIBDEFLATE_BUILD_SHARED_LIB=OFF \
+                  -DLIBDEFLATE_BUILD_STATIC_LIB=ON \
+                  -DLIBDEFLATE_BUILD_GZIP=OFF \
+                  -DLIBDEFLATE_BUILD_TESTS=OFF
+            cmake --build libdeflate-build --parallel
+            cmake --install libdeflate-build
+          fi
+
+          # openal-soft (static, OpenSL ES backend) — sound support
+          if [ ! -f "$DEPS/lib/libopenal.a" ]; then
+            curl -L -o openal.tar.gz https://github.com/kcat/openal-soft/archive/refs/tags/1.23.1.tar.gz
+            tar xzf openal.tar.gz
+            cmake -S openal-soft-1.23.1 -B openal-build $COMMON \
+                  -DLIBTYPE=STATIC \
+                  -DALSOFT_EXAMPLES=OFF \
+                  -DALSOFT_TESTS=OFF \
+                  -DALSOFT_UTILS=OFF \
+                  -DALSOFT_BACKEND_OPENSL=ON \
+                  -DALSOFT_BACKEND_OBOE=OFF
+            cmake --build openal-build --parallel
+            cmake --install openal-build
+          fi
+
+      - name: Package game assets into the APK project
+        run: |
+          chmod +x package_android_assets.sh
+          ./package_android_assets.sh
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('android/**/*.gradle', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+
+      - name: Restore release keystore (optional)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "KS_RELEASE_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+            echo "Release keystore restored from secrets."
+          else
+            echo "No ANDROID_KEYSTORE_BASE64 secret set."
+            echo "The release APK will be signed with the debug key (still installable on phones)."
+          fi
+
+      - name: Build APK (assembleRelease)
+        env:
+          KS_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KS_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Collect APK
+        run: |
+          mkdir -p build
+          cp android/app/build/outputs/apk/release/*.apk "build/KyroSpades Android.apk"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build
+          path: build/*.apk
+
+
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [build, build-android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -244,6 +382,7 @@ jobs:
             release-artifacts/KyroSpades-win64.zip
             release-artifacts/KyroSpades Linux.zip
             release-artifacts/KyroSpades MacOS.zip
+            release-artifacts/KyroSpades Android.apk
           body: Latest version of the game compiled for Windows, Linux and macOS.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

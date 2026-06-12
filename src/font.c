@@ -238,6 +238,12 @@ void font_render(float x, float y, float h, char* text) {
 		if(cp == 0) break;
 		if(cp == '\n') { x2 = x; y2 += h; continue; }
 
+		/* The vertex/coord buffers hold 2048*8 shorts and we write 12 per glyph.
+		   Without this guard, a long string (more likely on a wide landscape
+		   surface where text wraps less) overruns the buffer and segfaults the
+		   render thread (SEGV_ACCERR). Stop emitting glyphs before that happens. */
+		if(k + 12 > 2048 * 8) break;
+
 		int idx = font_glyph_index(font, cp);
 		if(idx < 0) idx = font_glyph_index(font, '?');
 		if(idx < 0) continue;
@@ -279,6 +285,15 @@ void font_render(float x, float y, float h, char* text) {
 	glLoadIdentity();
 	glScalef(1.0F / 8192.0F, 1.0F / 8192.0F, 1.0F);
 	glMatrixMode(GL_MODELVIEW);
+
+	/* HUD state-leak guard: see texture.c texture_draw_sector. World /
+	   tesselator / KV6 rendering can leave GL_COLOR_ARRAY enabled and
+	   GL_TEXTURE_ENV_MODE set to GL_COMBINE; both cause text to render
+	   in a leaked color regardless of glColor* at the call site. */
+	glDisableClientState(GL_COLOR_ARRAY);
+	glDisableClientState(GL_NORMAL_ARRAY);
+	glActiveTexture(GL_TEXTURE0);
+	glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
 	glEnable(GL_TEXTURE_2D);
 	glBindTexture(GL_TEXTURE_2D, font->texture_id);

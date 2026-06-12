@@ -29,6 +29,81 @@
 #include "log.h"
 #include "file.h"
 
+#if defined(USE_ANDROID_FILE) && defined(__ANDROID__)
+#include <jni.h>
+#include <android/asset_manager.h>
+#include <android/asset_manager_jni.h>
+
+/* Lazily fetch the app's AAssetManager through SDL's JNI helpers. The Java
+   AssetManager object is pinned with a global ref so the GC can never
+   collect it out from under the native pointer. Must be called from a
+   JVM-attached thread (SDLThread is). */
+static AAssetManager* file_asset_manager(void) {
+	static AAssetManager* mgr = NULL;
+	if(mgr)
+		return mgr;
+	JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
+	jobject activity = (jobject)SDL_AndroidGetActivity();
+	if(!env || !activity)
+		return NULL;
+	jclass cls = (*env)->GetObjectClass(env, activity);
+	jmethodID mid = (*env)->GetMethodID(env, cls, "getAssets", "()Landroid/content/res/AssetManager;");
+	if(mid) {
+		jobject am = (*env)->CallObjectMethod(env, activity, mid);
+		if(am) {
+			jobject global = (*env)->NewGlobalRef(env, am);
+			mgr = AAssetManager_fromJava(env, global);
+			(*env)->DeleteLocalRef(env, am);
+		}
+	}
+	(*env)->DeleteLocalRef(env, cls);
+	(*env)->DeleteLocalRef(env, activity);
+	return mgr;
+}
+#endif
+
+/* List the regular files in a directory, invoking cb(name, user) for each.
+   Returns the number of entries reported, or -1 if the directory could not
+   be opened anywhere. Tries the real filesystem first (desktop, and files
+   unpacked next to the Android external-storage CWD), then falls back to
+   the APK asset manager: assets live inside the APK, so opendir() cannot
+   see them -- this is why directory-driven features (random backgrounds)
+   silently degraded on Android while direct file loads worked. */
+int file_dir_list(const char* path, void (*cb)(const char* name, void* user), void* user) {
+	int count = 0;
+	DIR* dir = opendir(path);
+	if(dir) {
+		struct dirent* entry;
+		while((entry = readdir(dir)) != NULL) {
+			if(!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+				continue;
+			cb(entry->d_name, user);
+			count++;
+		}
+		closedir(dir);
+		return count;
+	}
+#if defined(USE_ANDROID_FILE) && defined(__ANDROID__)
+	AAssetManager* mgr = file_asset_manager();
+	if(mgr) {
+		/* Note: AAssetDir reports files only (no subdirectories), and
+		   openDir returns an empty listing rather than NULL for missing
+		   directories -- count 0 lets callers fall back gracefully. */
+		AAssetDir* adir = AAssetManager_openDir(mgr, path);
+		if(adir) {
+			const char* name;
+			while((name = AAssetDir_getNextFileName(adir)) != NULL) {
+				cb(name, user);
+				count++;
+			}
+			AAssetDir_close(adir);
+			return count;
+		}
+	}
+#endif
+	return -1;
+}
+
 struct file_handle {
 	void* internal;
 	int type;
@@ -56,13 +131,7 @@ void file_url(char* url) {
 }
 
 int file_dir_exists(const char* path) {
-#ifndef USE_ANDROID_FILE
 	DIR* d = opendir(path);
-#else
-	char str[256];
-	sprintf(str, "/sdcard/KyroSpades/%s", path);
-	DIR* d = opendir(str);
-#endif
 	if(d) {
 		closedir(d);
 		return 1;
@@ -72,16 +141,10 @@ int file_dir_exists(const char* path) {
 }
 
 int file_dir_create(const char* path) {
-#ifndef USE_ANDROID_FILE
 #ifdef OS_WINDOWS
 	mkdir(path);
 #else
 	mkdir(path, 0755);
-#endif
-#else
-	char str[256];
-	sprintf(str, "/sdcard/KyroSpades/%s", path);
-	mkdir(str);
 #endif
 	return 1;
 }
@@ -179,11 +242,13 @@ void* file_open(const char* name, const char* mode) {
 	handle->internal = (strchr(mode, 'r') != NULL) ? SDL_RWFromFile(name, mode) : NULL;
 	handle->type = FILE_SDL;
 	if(!handle->internal) {
+		/* Legacy fallback: older builds stored data in a fixed /sdcard path
+		   instead of the app's private storage (which main() now chdir()s
+		   into). Kept so files from old installs remain readable. */
 		char str[256];
-		sprintf(str, "/sdcard/KyroSpades/%s", name);
+		snprintf(str, sizeof(str), "/sdcard/KyroSpades/%s", name);
 		handle->internal = fopen(str, mode);
 		handle->type = FILE_STD;
-		// log_warn("open %s %i",str,handle->internal);
 	}
 	if(!handle->internal) {
 		free(handle);

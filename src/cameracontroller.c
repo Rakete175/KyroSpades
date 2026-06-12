@@ -25,6 +25,7 @@
 #include "camera.h"
 #include "matrix.h"
 #include "cameracontroller.h"
+#include "hud.h"
 #include "config.h"
 
 int cameracontroller_bodyview_mode = 0;

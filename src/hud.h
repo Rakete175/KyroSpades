@@ -70,7 +70,9 @@ extern struct window_instance* hud_window;
 #define HUD_FLAG_INDEX_START 64
 
 void hud_change(struct hud* new);
+float hud_ui_scale(void);
 void hud_init();
+void hud_ime_update();
 void hud_mousemode(int mode);
 int hud_accent_color();
 
