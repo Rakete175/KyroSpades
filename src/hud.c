@@ -3321,9 +3321,19 @@ static void hud_ingame_touch(void* finger, int action, float x, float y, float d
 			overlay_down_finger = finger;
 		if(action == TOUCH_UP && finger == overlay_down_finger) {
 			overlay_down_finger = NULL;
-			if(x < settings.window_width / 3)
+			/* The three visible anchors (labels + 3D models) sit in columns
+			   centered at 1/4, 1/2 and 3/4 of the window width, but the model
+			   offsets are a *perspective* projection: they scale with window
+			   HEIGHT and the FOV, not with width. On wide dev screens the
+			   right-hand model happened to fall inside the right third
+			   (x > 2/3 w); on narrower aspect ratios / larger FOVs it drifts
+			   left of that line, so tapping it selected the MIDDLE zone —
+			   i.e. "tap team 2, spawn as spectator". Splitting at the
+			   midpoints between the anchor columns (3/8 and 5/8) keeps every
+			   anchor safely inside its own zone across aspect ratios. */
+			if(x < settings.window_width * 0.375F)
 				hud_ingame_keyboard(WINDOW_KEY_SELECT1, WINDOW_PRESS, 0, 0);
-			else if(x > settings.window_width / 3 * 2)
+			else if(x > settings.window_width * 0.625F)
 				hud_ingame_keyboard(gun ? WINDOW_KEY_SELECT3 : WINDOW_KEY_SELECT2, WINDOW_PRESS, 0, 0);
 			else
 				hud_ingame_keyboard(gun ? WINDOW_KEY_SELECT2 : WINDOW_KEY_SELECT3, WINDOW_PRESS, 0, 0);
@@ -4153,8 +4163,20 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
 							 MU_OPT_HOLDFOCUS | MU_OPT_NORESIZE | MU_OPT_NOCLOSE)) {
 		mu_Container* cnt = mu_get_current_container(ctx);
 		mu_bring_to_front(ctx, cnt);
-		cnt->rect = mu_rect((settings.window_width - 300) / 2, 250, 300, 100);
-		mu_layout_row(ctx, 2, (int[]) {ctx->text_width(ctx->style->font, "Reason:", 0) * 1.5F, -1}, 0);
+		/* Size everything off the font, like the chat-log link modal: the
+		   old fixed 300x100 px box truncated both the title and the reason
+		   text once the UI font is scaled up on high-DPI / mobile screens. */
+		int th = ctx->text_height(ctx->style->font);
+		int pad = th;
+		int reason_w = ctx->text_width(ctx->style->font, "Reason:", 0) * 1.5F;
+		int w = ctx->text_width(ctx->style->font, "Disconnected from server", 0) + 4 * th;
+		int t = reason_w + ctx->text_width(ctx->style->font, chat_popup, 0) + 2 * pad;
+		if(t > w) w = t;
+		int max_w = settings.window_width * 92 / 100;
+		if(w > max_w) w = max_w;
+		int h = ctx->style->title_height + th + 3 * pad;
+		cnt->rect = mu_rect((settings.window_width - w) / 2, (settings.window_height - h) / 3, w, h);
+		mu_layout_row(ctx, 2, (int[]) {reason_w, -1}, 0);
 		mu_text(ctx, "Reason:");
 		mu_text(ctx, chat_popup);
 		mu_end_window(ctx);

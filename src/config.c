@@ -379,6 +379,11 @@ static int config_read_key(void* user, const char* section, const char* name, co
 		IMPORT_SETTING(settings.greedy_meshing, greedy_meshing, atoi(value));
 		IMPORT_SETTING(settings.vsync, vsync, atoi(value));
 		IMPORT_SETTING(settings.mouse_sensitivity, mouse_sensitivity, atof(value));
+		/* Migrate configs written while the default was the raw 0.002F
+		   constant; such values are meaningless for the `setting / 5`
+		   formula and would freeze the camera. */
+		if(settings.mouse_sensitivity > 0.0F && settings.mouse_sensitivity < 0.01F)
+			settings.mouse_sensitivity = 5.0F;
 		IMPORT_SETTING(settings.show_news, show_news, atoi(value));
 		if(!strcmp(name, "vol")) { settings.volume = max(min(atoi(value), 10), 0); sound_volume(settings.volume / 10.0F); }
 		IMPORT_SETTING(settings.show_fps, show_fps, atoi(value));

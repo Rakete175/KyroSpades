@@ -26,6 +26,9 @@
 #include "window.h"
 #include "config.h"
 #include "hud.h"
+#include "camera.h"
+#include "player.h"
+#include "network.h"
 
 void hud_ingame_mouseclick(double x, double y, int button, int action, int mods);
 extern float camera_rot_x, camera_rot_y;
@@ -831,8 +834,19 @@ void window_update() {
 				}
 
 				if(hud_active == &hud_ingame && f == aim_finger) {
-					camera_rot_x -= fdx * 0.002F;
-					camera_rot_y += fdy * 0.002F;
+					/* Mirror the desktop mouse-look formula from hud.c so the
+					   "Mouse sensitivity" setting (and invert Y / ADS slowdown)
+					   actually affects touch aiming, instead of the previous
+					   hardcoded 0.002F. */
+					float sens = settings.mouse_sensitivity / 5.0F * (float)MOUSE_SENSITIVITY;
+					float s = 1.0F;
+					if(camera_mode == CAMERAMODE_FPS && players[local_player_id].held_item == TOOL_GUN
+					   && players[local_player_id].input.buttons.rmb)
+						s = 0.5F;
+					if(settings.invert_y)
+						fdy *= -1.0F;
+					camera_rot_x -= fdx * sens * s;
+					camera_rot_y += fdy * sens * s;
 					camera_overflow_adjust();
 					break;
 				}
