@@ -23,6 +23,7 @@ jobs:
 
       - name: Sync upstream KyroSpades
         run: |
+          cp -r src /tmp/ks-backup-src
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/Kyrope01/KyroSpades.git || true
@@ -31,6 +32,7 @@ jobs:
             echo "::warning::Upstream merge failed (diverged history / conflicts) — building WITHOUT latest upstream changes."
             git merge --abort || true
           fi
+          rm -rf src && mv /tmp/ks-backup-src src
         shell: bash
 
       - name: Cache CMake dependencies
@@ -227,6 +229,7 @@ jobs:
 
       - name: Sync upstream KyroSpades
         run: |
+          cp -r src /tmp/ks-backup-src
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/Kyrope01/KyroSpades.git || true
@@ -235,6 +238,7 @@ jobs:
             echo "::warning::Upstream merge failed (diverged history / conflicts) — building WITHOUT latest upstream changes."
             git merge --abort || true
           fi
+          rm -rf src && mv /tmp/ks-backup-src src
         shell: bash
 
       - name: Ensure Android asset script exists
