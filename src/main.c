@@ -692,7 +692,7 @@ void display() {
 						glUniform1i(glGetUniformLocation(postproc.shader, "tex"), 0);
 						glx_draw_screen_quad();
 					} else {
-#else
+#endif
 					glBegin(GL_QUADS);
 					glTexCoord2f(0.0F, 0.0F); glVertex2f(0.0F, 0.0F);
 					glTexCoord2f(1.0F, 0.0F); glVertex2f((float)settings.window_width, 0.0F);
