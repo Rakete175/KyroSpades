@@ -692,13 +692,14 @@ void display() {
 						glUniform1i(glGetUniformLocation(postproc.shader, "tex"), 0);
 						glx_draw_screen_quad();
 					} else {
-#endif
+#else
 					glBegin(GL_QUADS);
 					glTexCoord2f(0.0F, 0.0F); glVertex2f(0.0F, 0.0F);
 					glTexCoord2f(1.0F, 0.0F); glVertex2f((float)settings.window_width, 0.0F);
 					glTexCoord2f(1.0F, 1.0F); glVertex2f((float)settings.window_width, (float)settings.window_height);
 					glTexCoord2f(0.0F, 1.0F); glVertex2f(0.0F, (float)settings.window_height);
 					glEnd();
+#endif
 #if defined(OPENGL_ES)
 					}
 #endif
