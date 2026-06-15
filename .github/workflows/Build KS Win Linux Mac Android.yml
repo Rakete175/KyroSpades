@@ -237,6 +237,41 @@ jobs:
           fi
         shell: bash
 
+      - name: Ensure Android asset script exists
+        run: |
+          if [[ ! -f package_android_assets.sh ]]; then
+            echo "package_android_assets.sh missing after upstream merge — creating inline"
+            cat > package_android_assets.sh << 'ASSETS_EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          KS_DIR="${1:-$SCRIPT_DIR}"
+          ASSETS="$KS_DIR/android/app/src/main/assets"
+          [[ -d "$KS_DIR/resources" ]] || { echo "::error::resources/ directory not found"; exit 1; }
+          if [[ ! -f "$KS_DIR/bsresources.zip" ]]; then
+            echo "bsresources.zip not found — downloading ..."
+            curl -L --fail -o "$KS_DIR/bsresources.zip" http://aos.party/bsresources.zip
+          fi
+          rm -rf "$ASSETS"
+          mkdir -p "$ASSETS"
+          echo "[1/3] Copying resources/ ..."
+          cp -R "$KS_DIR/resources/." "$ASSETS/"
+          rm -f "$ASSETS/icon.rc"
+          echo "[2/3] Extracting bsresources.zip ..."
+          unzip -o -q "$KS_DIR/bsresources.zip" -d "$ASSETS"
+          find "$ASSETS" -name '.gitignore' -delete
+          if [[ -d "$KS_DIR/resources.override" ]]; then
+            echo "[3/3] Applying resources.override/ ..."
+            cp -R "$KS_DIR/resources.override/." "$ASSETS/"
+          else
+            echo "[3/3] No resources.override/ — skipping"
+          fi
+          echo "Done. config.ini: $( [[ -f "$ASSETS/config.ini" ]] && echo present || echo MISSING )"
+          ASSETS_EOF
+            chmod +x package_android_assets.sh
+          fi
+        shell: bash
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -309,12 +344,8 @@ jobs:
 
       - name: Package game assets into the APK project
         run: |
-          if [ ! -f "$GITHUB_WORKSPACE/package_android_assets.sh" ]; then
-            echo "::error::package_android_assets.sh not found — make sure it is committed to the repo."
-            exit 1
-          fi
-          chmod +x "$GITHUB_WORKSPACE/package_android_assets.sh"
-          "$GITHUB_WORKSPACE/package_android_assets.sh"
+          chmod +x package_android_assets.sh
+          ./package_android_assets.sh
 
       - name: Cache Gradle
         uses: actions/cache@v4
