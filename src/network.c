@@ -38,7 +38,6 @@
 #include "texture.h"
 #include "chunk.h"
 #include "skins.h"
-#include "gmi.h"
 #include "config.h"
 #include "demo.h"
 #include "window.h"
@@ -159,9 +158,6 @@ void read_PacketChatMessage(void* data, int len) {
 			return;
 		case CHAT_SYSTEM:
 			// try to determine gamemode
-			if(settings.gmi && gmi_mode == GMI_MODE_UNDETECTED) {
-				gmi_mode_detect_message(p->message);
-			}
 
 			if(p->player_id == 255) {
 				strncpy(network_custom_reason, p->message, 16);
@@ -700,7 +696,7 @@ void read_PacketKillAction(void* data, int len) {
 
 		char color_killer = team_color_char(players[p->killer_id].team);
 		char color_dead   = team_color_char(players[p->player_id].team);
-		char color_kill   = (p->killer_id == local_player_id || p->player_id == local_player_id) ? '\4': '\6';
+		char color_kill   = '\4';
 		switch(p->kill_type) {
 			case KILLTYPE_WEAPON:
 				sprintf(m, "%c%s%c killed %c%s%c (%s)", color_killer, players[p->killer_id].name, color_kill, color_dead, players[p->player_id].name,
@@ -1117,7 +1113,6 @@ int network_connect_sub(char* ip, int port, int version) {
 	if(enet_host_service(client, &event, 2500) > 0 && event.type == ENET_EVENT_TYPE_CONNECT) {
 		network_received_packets = 0;
 		network_connected = 1;
-		gmi_mode = GMI_MODE_UNDETECTED;
 		strncpy(network_current_ip, ip, sizeof(network_current_ip) - 1);
 		network_current_ip[sizeof(network_current_ip) - 1] = 0;
 		network_current_port = port;

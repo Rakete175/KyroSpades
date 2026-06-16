@@ -535,6 +535,19 @@ void glx_draw_line_2d(float x1, float y1, float x2, float y2) {
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 		return;
 	}
+	{
+		float verts[] = {x1, y1, x2, y2};
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		glDisable(GL_TEXTURE_2D);
+		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+		glDisableClientState(GL_COLOR_ARRAY);
+		glDisableClientState(GL_NORMAL_ARRAY);
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glVertexPointer(2, GL_FLOAT, 0, verts);
+		glDrawArrays(GL_LINES, 0, 2);
+		glDisableClientState(GL_VERTEX_ARRAY);
+		glEnable(GL_TEXTURE_2D);
+	}
 #else
 	glBegin(GL_LINES);
 	glVertex2f(x1, y1);
@@ -567,6 +580,22 @@ void glx_draw_quad_2d(float x, float y, float w, float h) {
 		glDisableVertexAttribArray(0);
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
 		return;
+	}
+	{
+		float verts[] = {
+			x, y,        x, y - h,     x + w, y - h,
+			x, y,        x + w, y - h, x + w, y,
+		};
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+		glDisable(GL_TEXTURE_2D);
+		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+		glDisableClientState(GL_COLOR_ARRAY);
+		glDisableClientState(GL_NORMAL_ARRAY);
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glVertexPointer(2, GL_FLOAT, 0, verts);
+		glDrawArrays(GL_TRIANGLES, 0, 6);
+		glDisableClientState(GL_VERTEX_ARRAY);
+		glEnable(GL_TEXTURE_2D);
 	}
 #else
 	glBegin(GL_QUADS);

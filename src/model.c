@@ -479,7 +479,7 @@ void kv6_render(struct kv6_t* kv6, unsigned char team) {
 			glEnable(GL_LIGHTING);
 			glEnable(GL_LIGHT0);
 			glEnable(GL_COLOR_MATERIAL);
-#if !defined(OPENGL_ES) || gles_version < 2
+#ifndef OPENGL_ES
 			glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE);
 #endif
 			glEnable(GL_NORMALIZE);

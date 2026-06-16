@@ -308,7 +308,6 @@ void config_save() {
 	config_setf("client", "spectator_acceleration", settings.spectator_acceleration);
 	config_setf("client", "spectator_fog_distance", settings.spectator_fog_distance);
 	config_seti("client", "iron_sight", settings.iron_sight);
-	config_seti("client", "gmi", settings.gmi);
 	config_seti("client", "disable_raw_input", settings.disable_raw_input);
 	config_seti("client", "ui_spacing", settings.ui_spacing);
 	config_seti("client", "ui_padding", settings.ui_padding);
@@ -416,7 +415,6 @@ static int config_read_key(void* user, const char* section, const char* name, co
 		IMPORT_SETTING(settings.spectator_acceleration, spectator_acceleration, max(10.0F, min(200.0F, atof(value))));
 		IMPORT_SETTING(settings.spectator_fog_distance, spectator_fog_distance, max(5.f, min(512.f, atof(value))));
 		IMPORT_SETTING(settings.iron_sight, iron_sight, atoi(value));
-		IMPORT_SETTING(settings.gmi, gmi, atoi(value));
 		IMPORT_SETTING(settings.disable_raw_input, disable_raw_input, atoi(value));
 		IMPORT_SETTING(settings.ui_spacing, ui_spacing, atoi(value));
 		IMPORT_SETTING(settings.ui_padding, ui_padding, atoi(value));
@@ -1137,21 +1135,11 @@ void config_reload() {
 			 });
 	list_add(&config_settings,
 			 &(struct config_setting) {
-				 .value = &settings_tmp.gmi,
-				 .type = CONFIG_TYPE_INT,
-				 .min = 0,
-				 .max = 1,
-				 .help = "Integrate gamemode features in the HUD",
-				 .name = "GMI (experimental)",
-				 .category = "HUD/UI Settings",
-			 });
-	list_add(&config_settings,
-			 &(struct config_setting) {
 				 .value = &settings_tmp.show_live_player_count,
 				 .type = CONFIG_TYPE_INT,
 				 .min = 0,
 				 .max = 1,
-				 .help = "Always show live player count when GMI is enabled",
+				 .help = "Show live player count in the HUD",
 				 .name = "Show live player count",
 				 .category = "HUD/UI Settings",
 			 });

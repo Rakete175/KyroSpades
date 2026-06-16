@@ -52,7 +52,6 @@
 #include "tracer.h"
 #include "font.h"
 #include "sound.h"
-#include "gmi.h"
 #include "chatlog.h"
 #include "particle.h"
 #include "model.h"
@@ -922,15 +921,20 @@ token = strtok(NULL, ", ");
 }
 
 
-if(channel == 0 && *chat[channel][idx] != '\0') {
-if(is_mentioned) {
+if(*chat[channel][idx] != '\0') {
+if(channel == 0 && is_mentioned) {
 glColor3ub(settings.chat_mention_r, settings.chat_mention_g, settings.chat_mention_b);
 } else {
 glColor3ub(red(chat_color[channel][idx]), green(chat_color[channel][idx]), blue(chat_color[channel][idx]));
 }
 glLineWidth(3);
+if(channel == 0) {
 glx_draw_line_2d(x - 11.F, y + settings.chat_spacing / 2.F + 1.F,
                   x - 11.F, floor(y - 16.F - settings.chat_spacing / 2 + 1.F));
+} else {
+glx_draw_line_2d(x - 11.F, y + 2.F,
+                  x - 11.F, y - 16.F);
+}
 glLineWidth(1);
 glColor3ub(255, 255, 255);
 }
@@ -942,16 +946,12 @@ for(c = chat[channel][idx]; *c != '\0'; c++) {
 if((unsigned char)*c == 0xFF) {
 buffer[i] = '\0';
 float len = font_length(16.F, buffer) - 2.F;
-if(channel != 0) {
-hud_font_render(x, y, 16.F, buffer, .4F);
-} else {
-if(is_mentioned)
-glColor3ub(settings.chat_mention_r, settings.chat_mention_g, settings.chat_mention_b);
-font_render(x, y, 16.F, buffer);
-}
-x += len;
-i = 0;
-continue;
+	if(is_mentioned)
+		glColor3ub(settings.chat_mention_r, settings.chat_mention_g, settings.chat_mention_b);
+	font_render(x, y, 16.F, buffer);
+	x += len;
+	i = 0;
+	continue;
 }
 // Chat color codes are 1..7; everything else (including UTF-8 high bytes) is text.
 if((unsigned char)*c > 7) {buffer[i++] = *c;
@@ -962,14 +962,10 @@ continue;
 
 buffer[i] = '\0';
 float len = font_length(16.F, buffer) - 2.F;
-if(channel != 0) {
-hud_font_render(x, y, 16.F, buffer, .4F);
-} else {
 if(is_mentioned) {
 glColor3ub(settings.chat_mention_r, settings.chat_mention_g, settings.chat_mention_b);
 }
 font_render(x, y, 16.F, buffer);
-}
 
 switch(*c) {
 case '\1': glColor3ub(LIGHTEN(gamestate.team_1.red), LIGHTEN(gamestate.team_1.green), LIGHTEN(gamestate.team_1.blue)); break; // Team1 color
@@ -1596,7 +1592,7 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 				texture_draw(&texture_color_selection, settings.window_width - 64 - 7, 48.F + 64, 64, 64);
 			}
 
-			if(settings.gmi && (settings.show_live_player_count || gmi_mode == GMI_MODE_ARENA)) {
+			if(settings.show_live_player_count) {
 				unsigned int team1_alive = 0;
 				unsigned int team2_alive = 0;
 				for(int k = 0; k < PLAYERS_MAX; k++) {
@@ -1676,15 +1672,13 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 		if(settings.player_stats && network_connected && network_logged_in
 		   && players[local_player_id].team != TEAM_SPECTATOR) {
 			font_select(FONT_FIXEDSYS);
-			struct Team* team = players[local_player_id].team == TEAM_1
-				? &gamestate.team_1 : &gamestate.team_2;
 			float x = 8.F;
 			float y = settings.window_height / 2.F - 60.F;
 			float h = 16.F;
 			char line[64];
 			char num_buf[32];
 
-			glColor3ub(team->red, team->green, team->blue);
+			glColor3ub(255, 255, 255);
 			format_comma(num_buf, player_stats_blocks_placed);
 			sprintf(line, "Blocks Placed: %s", num_buf);
 			hud_font_render_outlined(x, y, h, line, 1.F);
@@ -1715,15 +1709,13 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 		if(settings.player_technical_stats && network_connected && network_logged_in
 		   && players[local_player_id].team != TEAM_SPECTATOR) {
 			font_select(FONT_FIXEDSYS);
-			struct Team* team = players[local_player_id].team == TEAM_1
-				? &gamestate.team_1 : &gamestate.team_2;
 			float right_edge = settings.window_width - 8.F;
 			float y = settings.window_height / 2.F - 44.F;
 			float h = 16.F;
 			char line[64];
 			char num_buf[32];
 
-			glColor3ub(team->red, team->green, team->blue);
+			glColor3ub(255, 255, 255);
 			format_comma(num_buf, particle_stats_count);
 			sprintf(line, "Particles: %s", num_buf);
 			hud_font_render_outlined(right_edge - font_length(h, line), y, h, line, 1.F);
