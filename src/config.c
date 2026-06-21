@@ -336,6 +336,10 @@ void config_save() {
 	config_seti("client", "skin_intel", settings.skin_intel);
 	config_seti("client", "skin_tent", settings.skin_tent);
 	config_seti("client", "debug_log", settings.debug_log);
+	config_setf("client", "exposure", settings.exposure);
+	config_setf("client", "saturation", settings.saturation);
+	config_setf("client", "contrast", settings.contrast);
+	config_setf("client", "vignette", settings.vignette);
 
 	config_sets("meta", "backend", CONFIG_BACKEND);
 
@@ -443,6 +447,10 @@ static int config_read_key(void* user, const char* section, const char* name, co
 		IMPORT_SETTING(settings.skin_intel, skin_intel, max(0, atoi(value)));
 		IMPORT_SETTING(settings.skin_tent, skin_tent, max(0, atoi(value)));
 		IMPORT_SETTING(settings.debug_log, debug_log, atoi(value));
+		IMPORT_SETTING(settings.exposure, exposure, atof(value));
+		IMPORT_SETTING(settings.saturation, saturation, atof(value));
+		IMPORT_SETTING(settings.contrast, contrast, atof(value));
+		IMPORT_SETTING(settings.vignette, vignette, fmaxf(0.0F, atof(value)));
 	}
 	if(!strcmp(section, "meta")) {
 		if(!strcmp(name, "backend")) {
@@ -829,6 +837,7 @@ void config_reload() {
 				 .name = "Fullscreen",
 				 .category = "Graphic Settings",
 			 });
+#ifndef OPENGL_ES
 	list_add(&config_settings,
 			 &(struct config_setting) {
 				 .value = &settings_tmp.multisamples,
@@ -846,6 +855,7 @@ void config_reload() {
 				 .label_callback = config_label_msaa,
 				 .category = "Graphic Settings",
 			 });
+#endif
 	list_add(&config_settings,
 			 &(struct config_setting) {
 				 .value = &settings_tmp.voxlap_models,
@@ -886,6 +896,7 @@ void config_reload() {
 				 .name = "Greedy meshing",
 				 .category = "Graphic Settings",
 			 });
+#ifndef OPENGL_ES
 	list_add(&config_settings,
 			 &(struct config_setting) {
 				 .value = &settings_tmp.force_displaylist,
@@ -906,6 +917,7 @@ void config_reload() {
 				 .name = "Smooth fog",
 				 .category = "Graphic Settings",
 			 });
+#endif
 	list_add(&config_settings,
 			 &(struct config_setting) {
 				 .value = &settings_tmp.ambient_occlusion,
@@ -1244,17 +1256,6 @@ void config_reload() {
 				 .help = "Enables multitextured blocks with texture atlas blending",
 				 .name = "Textured Blocks",
 				 .category = "Graphic Settings",
-			 });
-
-	list_add(&config_settings,
-			 &(struct config_setting) {
-				 .value = &settings_tmp.minimap_zoom,
-				 .type = CONFIG_TYPE_INT,
-				 .min = 1,
-				 .max = 5,
-				 .help = "Minimap zoom level (1-5)",
-				 .name = "Minimap zoom",
-				 .category = "HUD/UI Settings",
 			 });
 
 	list_add(&config_settings,

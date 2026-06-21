@@ -2074,8 +2074,10 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 					glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
 					glEnable(GL_SCISSOR_TEST);
 					glScissor((int)box_x, (int)(box_top - box_size), (int)ceil(box_size), (int)ceil(box_size));
-					texture_draw(&texture_minimap, box_x - (camera_x - 64.0F) * scalef,
-								 box_top + (camera_z - 64.0F) * scalef, 512 * scalef, 512 * scalef);
+				float tex_off_x = max(0.0F, min(384.0F, camera_x - half_vp));
+				float tex_off_y = max(0.0F, min(384.0F, camera_z - half_vp));
+				texture_draw(&texture_minimap, box_x - tex_off_x * scalef,
+							 box_top + tex_off_y * scalef, 512 * scalef, 512 * scalef);
 					glDisable(GL_SCISSOR_TEST);
 
 					int gl_err = glGetError();
@@ -2762,11 +2764,6 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 				settings.minimap_zoom++;
 				if(settings.minimap_zoom > 5)
 					settings.minimap_zoom = 1;
-				char zoomstr[64];
-				float zoom_sizes[] = {32.0F, 64.0F, 128.0F, 256.0F, 512.0F};
-				sprintf(zoomstr, "Minimap: %ix%i", (int)zoom_sizes[settings.minimap_zoom - 1],
-						(int)zoom_sizes[settings.minimap_zoom - 1]);
-				chat_add(0, 0x00FFFF, zoomstr);
 			}
 
 			if(key == WINDOW_KEY_COMMAND) {

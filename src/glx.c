@@ -47,10 +47,12 @@ static GLint loc_u_HasVertexColor = -1;
 static GLint loc_u_TextureEnabled = -1;
 static GLint loc_u_Texture = -1;
 static GLint loc_u_TexCoordScale = -1;
+static GLint loc_u_TeamColor = -1;
 static GLuint quad_vbo = 0;
 static GLuint line_quad_vbo = 0;
 
 static const char* default_vs =
+	"precision highp float;\n"
 	"attribute vec4 a_Position;\n"
 	"attribute vec4 a_Color;\n"
 	"attribute vec2 a_TexCoord;\n"
@@ -58,10 +60,11 @@ static const char* default_vs =
 	"uniform vec4 u_Color;\n"
 	"uniform float u_HasVertexColor;\n"
 	"uniform float u_TexCoordScale;\n"
+	"uniform vec4 u_TeamColor;\n"
 	"varying vec4 v_Color;\n"
 	"varying vec2 v_TexCoord;\n"
 	"void main() {\n"
-	"    v_Color = mix(u_Color, a_Color, u_HasVertexColor);\n"
+	"    v_Color = mix(u_Color, a_Color, u_HasVertexColor) * u_TeamColor;\n"
 	"    v_TexCoord = a_TexCoord * u_TexCoordScale;\n"
 	"    gl_Position = u_MVP * a_Position;\n"
 	"}\n";
@@ -107,6 +110,20 @@ void glx_get_current_color(float* dst) {
 	dst[3] = gles_current_color[3];
 }
 
+void glx_set_team_color(float r, float g, float b) {
+#ifdef OPENGL_ES
+	if(gles_version >= 2) {
+		GLint prog;
+		glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
+		if(prog) {
+			GLint loc = glGetUniformLocation(prog, "u_TeamColor");
+			if(loc >= 0)
+				glUniform4f(loc, r, g, b, 1.0F);
+		}
+	}
+#endif
+}
+
 /* ── GL version detection ────────────────────────────────────────────────── */
 
 static int glx_major_ver() {
@@ -130,9 +147,11 @@ void glx_init() {
 			loc_u_TextureEnabled = glGetUniformLocation(default_shader, "u_TextureEnabled");
 			loc_u_Texture = glGetUniformLocation(default_shader, "u_Texture");
 			loc_u_TexCoordScale = glGetUniformLocation(default_shader, "u_TexCoordScale");
+			loc_u_TeamColor = glGetUniformLocation(default_shader, "u_TeamColor");
 			glUseProgram(default_shader);
 			glUniform1i(loc_u_Texture, 0);
 			glUniform4f(loc_u_Color, 1.0F, 1.0F, 1.0F, 1.0F);
+			glUniform4f(loc_u_TeamColor, 1.0F, 1.0F, 1.0F, 1.0F);
 			glUniform1f(loc_u_HasVertexColor, 0.0F);
 			glUniform1f(loc_u_TextureEnabled, 0.0F);
 			glUniform1f(loc_u_TexCoordScale, 1.0F);
@@ -157,16 +176,19 @@ int glx_shader(const char* vertex, const char* fragment) {
 		return 0;
 #endif
 	int v = 0, f = 0;
+	GLint ok;
+
 	if(vertex) {
 		v = glCreateShader(GL_VERTEX_SHADER);
 		glShaderSource(v, 1, (const GLchar* const*)&vertex, NULL);
 		glCompileShader(v);
-		GLint ok;
 		glGetShaderiv(v, GL_COMPILE_STATUS, &ok);
 		if(!ok) {
 			char log[1024];
 			glGetShaderInfoLog(v, sizeof(log), NULL, log);
 			log_error("Vertex shader compile error: %s", log);
+			glDeleteShader(v);
+			return 0;
 		}
 	}
 
@@ -174,12 +196,14 @@ int glx_shader(const char* vertex, const char* fragment) {
 		f = glCreateShader(GL_FRAGMENT_SHADER);
 		glShaderSource(f, 1, (const GLchar* const*)&fragment, NULL);
 		glCompileShader(f);
-		GLint ok;
 		glGetShaderiv(f, GL_COMPILE_STATUS, &ok);
 		if(!ok) {
 			char log[1024];
 			glGetShaderInfoLog(f, sizeof(log), NULL, log);
 			log_error("Fragment shader compile error: %s", log);
+			if(v) glDeleteShader(v);
+			glDeleteShader(f);
+			return 0;
 		}
 	}
 
@@ -194,12 +218,15 @@ int glx_shader(const char* vertex, const char* fragment) {
 	glBindAttribLocation(program, 3, "a_Normal");
 	glLinkProgram(program);
 
-	GLint linked;
-	glGetProgramiv(program, GL_LINK_STATUS, &linked);
-	if(!linked) {
+	glGetProgramiv(program, GL_LINK_STATUS, &ok);
+	if(!ok) {
 		char log[1024];
 		glGetProgramInfoLog(program, sizeof(log), NULL, log);
 		log_error("Shader link error: %s", log);
+		glDeleteProgram(program);
+		if(v) glDeleteShader(v);
+		if(f) glDeleteShader(f);
+		return 0;
 	}
 
 	if(v) glDeleteShader(v);

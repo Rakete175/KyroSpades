@@ -340,6 +340,7 @@ void display() {
 #if defined(OPENGL_ES)
 				if(gles_version >= 2) {
 					const char* vert =
+						"precision highp float;\n"
 						"attribute vec2 a_Position;\n"
 						"attribute vec2 a_TexCoord;\n"
 						"varying vec2 v_TexCoord;\n"
