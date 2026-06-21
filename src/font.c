@@ -192,7 +192,7 @@ static struct font_backed_data* font_find(float h) {
 		rgba[i * 4 + 0] = 255;
 		rgba[i * 4 + 1] = 255;
 		rgba[i * 4 + 2] = 255;
-		rgba[i * 4 + 3] = temp_bitmap[i];
+		rgba[i * 4 + 3] = ((const unsigned char*)temp_bitmap)[i];
 	}
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, f.w, f.h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
 	free(rgba);
