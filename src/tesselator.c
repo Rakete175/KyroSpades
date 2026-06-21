@@ -363,7 +363,9 @@ void tesselator_addi_uv(struct tesselator* t, int16_t* coords, float* uvs) {
 	memcpy(((int16_t*)t->vertices) + t->quad_count * 3 * 6 + 3 * 0, coords, sizeof(int16_t) * 3 * 3);
 	memcpy(((int16_t*)t->vertices) + t->quad_count * 3 * 6 + 3 * 3, coords + 3 * 0, sizeof(int16_t) * 3);
 	memcpy(((int16_t*)t->vertices) + t->quad_count * 3 * 6 + 3 * 4, coords + 3 * 2, sizeof(int16_t) * 3 * 2);
-	memcpy(t->texcoords + t->quad_count * 2 * 6, uvs, sizeof(float) * 2 * 6);
+	memcpy(t->texcoords + t->quad_count * 2 * 6 + 2 * 0, uvs, sizeof(float) * 2 * 3);
+	memcpy(t->texcoords + t->quad_count * 2 * 6 + 2 * 3, uvs + 2 * 0, sizeof(float) * 2);
+	memcpy(t->texcoords + t->quad_count * 2 * 6 + 2 * 4, uvs + 2 * 2, sizeof(float) * 2 * 2);
 #endif
 
 	t->quad_count++;
