@@ -312,6 +312,10 @@ void config_save() {
 	config_seti("client", "ui_spacing", settings.ui_spacing);
 	config_seti("client", "ui_padding", settings.ui_padding);
 	config_setf("client", "ao_multiplier", settings.ao_multiplier);
+	config_setf("client", "exposure", settings.exposure);
+	config_setf("client", "saturation", settings.saturation);
+	config_setf("client", "contrast", settings.contrast);
+	config_setf("client", "vignette", settings.vignette);
 	config_seti("client", "show_live_player_count", settings.show_live_player_count);
 	config_seti("client", "ads_zoom_animation", settings.ads_zoom_animation);
 	config_seti("client", "auto_demo_recording", settings.auto_demo_recording);
@@ -419,6 +423,10 @@ static int config_read_key(void* user, const char* section, const char* name, co
 		IMPORT_SETTING(settings.ui_spacing, ui_spacing, atoi(value));
 		IMPORT_SETTING(settings.ui_padding, ui_padding, atoi(value));
 		IMPORT_SETTING(settings.ao_multiplier, ao_multiplier, fmaxf(0.0F, atof(value)));
+		IMPORT_SETTING(settings.exposure, exposure, fmaxf(-100.0F, fminf(100.0F, atof(value))));
+		IMPORT_SETTING(settings.saturation, saturation, fmaxf(-100.0F, fminf(100.0F, atof(value))));
+		IMPORT_SETTING(settings.contrast, contrast, fmaxf(-100.0F, fminf(100.0F, atof(value))));
+		IMPORT_SETTING(settings.vignette, vignette, fmaxf(0.0F, fminf(100.0F, atof(value))));
 		IMPORT_SETTING(settings.show_live_player_count, show_live_player_count, atoi(value));
 		IMPORT_SETTING(settings.ads_zoom_animation, ads_zoom_animation, atoi(value));
 		IMPORT_SETTING(settings.auto_demo_recording, auto_demo_recording, atoi(value));

@@ -605,7 +605,7 @@ void window_init() {
 	   type ES1 vs ES2) is chosen at window creation time. Setting them after
 	   the window exists makes the context/config pairing driver-dependent.
 	   Try ES 2.0 first; fall back to ES 1.1 if context creation fails. */
-	int es_major = 1, es_minor = 1;
+	int es_major = 2, es_minor = 0;
 #ifdef OPENGL_ES
 retry_context:
 #endif

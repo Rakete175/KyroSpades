@@ -4501,12 +4501,15 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
 	}
 
 	if(memcmp(&settings, &settings_tmp, sizeof(struct RENDER_OPTIONS)) != 0) {
-		int textured_changed = settings.textured_blocks != settings_tmp.textured_blocks;
+		int remesh = settings.textured_blocks != settings_tmp.textured_blocks
+			|| settings.ambient_occlusion != settings_tmp.ambient_occlusion
+			|| settings.greedy_meshing != settings_tmp.greedy_meshing
+			|| settings.ao_multiplier != settings_tmp.ao_multiplier;
 		memcpy(&settings, &settings_tmp, sizeof(struct RENDER_OPTIONS));
 		window_fromsettings();
 		sound_volume(settings.volume / 10.0F);
 		config_save();
-		if(textured_changed)
+		if(remesh)
 			chunk_rebuild_all();
 	}
 }
