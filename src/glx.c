@@ -47,6 +47,10 @@ static GLint loc_u_HasVertexColor = -1;
 static GLint loc_u_TextureEnabled = -1;
 static GLint loc_u_Texture = -1;
 static GLint loc_u_TexCoordScale = -1;
+static GLint loc_u_Model = -1;
+static GLint loc_u_Camera = -1;
+static GLint loc_u_FogDist = -1;
+static GLint loc_u_FogColor = -1;
 static GLuint quad_vbo = 0;
 static GLuint line_quad_vbo = 0;
 
@@ -55,14 +59,20 @@ static const char* default_vs =
 	"attribute vec4 a_Color;\n"
 	"attribute vec2 a_TexCoord;\n"
 	"uniform mat4 u_MVP;\n"
+	"uniform mat4 u_Model;\n"
 	"uniform vec4 u_Color;\n"
 	"uniform float u_HasVertexColor;\n"
 	"uniform float u_TexCoordScale;\n"
+	"uniform vec3 u_Camera;\n"
+	"uniform float u_FogDist;\n"
 	"varying vec4 v_Color;\n"
 	"varying vec2 v_TexCoord;\n"
+	"varying float v_Fog;\n"
 	"void main() {\n"
 	"    v_Color = mix(u_Color, a_Color, u_HasVertexColor);\n"
 	"    v_TexCoord = a_TexCoord * u_TexCoordScale;\n"
+	"    vec3 world = (u_Model * a_Position).xyz;\n"
+	"    v_Fog = clamp(length(world.xz - u_Camera.xz) * u_FogDist, 0.0, 1.0);\n"
 	"    gl_Position = u_MVP * a_Position;\n"
 	"}\n";
 
@@ -70,11 +80,14 @@ static const char* default_fs =
 	"precision mediump float;\n"
 	"varying vec4 v_Color;\n"
 	"varying vec2 v_TexCoord;\n"
+	"varying float v_Fog;\n"
 	"uniform sampler2D u_Texture;\n"
 	"uniform float u_TextureEnabled;\n"
+	"uniform vec3 u_FogColor;\n"
 	"void main() {\n"
 	"    vec4 tex = texture2D(u_Texture, v_TexCoord);\n"
-	"    gl_FragColor = mix(vec4(1.0), tex, u_TextureEnabled) * v_Color;\n"
+	"    vec4 c = mix(vec4(1.0), tex, u_TextureEnabled) * v_Color;\n"
+	"    gl_FragColor = vec4(mix(c.rgb, u_FogColor, v_Fog), c.a);\n"
 	"}\n";
 #endif
 
@@ -130,12 +143,20 @@ void glx_init() {
 			loc_u_TextureEnabled = glGetUniformLocation(default_shader, "u_TextureEnabled");
 			loc_u_Texture = glGetUniformLocation(default_shader, "u_Texture");
 			loc_u_TexCoordScale = glGetUniformLocation(default_shader, "u_TexCoordScale");
+			loc_u_Model = glGetUniformLocation(default_shader, "u_Model");
+			loc_u_Camera = glGetUniformLocation(default_shader, "u_Camera");
+			loc_u_FogDist = glGetUniformLocation(default_shader, "u_FogDist");
+			loc_u_FogColor = glGetUniformLocation(default_shader, "u_FogColor");
 			glUseProgram(default_shader);
 			glUniform1i(loc_u_Texture, 0);
 			glUniform4f(loc_u_Color, 1.0F, 1.0F, 1.0F, 1.0F);
 			glUniform1f(loc_u_HasVertexColor, 0.0F);
 			glUniform1f(loc_u_TextureEnabled, 0.0F);
 			glUniform1f(loc_u_TexCoordScale, 1.0F);
+			glUniformMatrix4fv(loc_u_Model, 1, GL_FALSE, (float[]) {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1});
+			glUniform3f(loc_u_Camera, 0.0F, 0.0F, 0.0F);
+			glUniform1f(loc_u_FogDist, 0.0F);
+			glUniform3f(loc_u_FogColor, 0.0F, 0.0F, 0.0F);
 			glUseProgram(0);
 			log_info("GLES 2.0 default shader compiled (program %u)", default_shader);
 		} else {
@@ -682,7 +703,12 @@ void glx_enable_sphericalfog() {
 		glFogf(GL_FOG_END, settings.render_distance);
 		glFogfv(GL_FOG_COLOR, fog_color);
 	}
-	/* ES 2.0: fog handled by shader — nothing to do here */
+	if(gles_version >= 2 && default_shader) {
+		glx_use_default_shader();
+		glUniform1f(loc_u_FogDist, 1.0F / settings.render_distance);
+		glUniform3f(loc_u_FogColor, fog_color[0], fog_color[1], fog_color[2]);
+		glUniform3f(loc_u_Camera, camera_x, camera_y, camera_z);
+	}
 #endif
 	glx_fog = 1;
 }
@@ -713,7 +739,10 @@ void glx_disable_sphericalfog() {
 		float a[4] = {0.2F, 0.2F, 0.2F, 1.0F};
 		glLightModelfv(GL_LIGHT_MODEL_AMBIENT, a);
 	}
-	/* ES 2.0: nothing to undo */
+	if(gles_version >= 2 && default_shader) {
+		glx_use_default_shader();
+		glUniform1f(loc_u_FogDist, 0.0F);
+	}
 #endif
 	glx_fog = 0;
 }
