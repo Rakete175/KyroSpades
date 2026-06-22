@@ -183,30 +183,39 @@ void texture_delete(struct texture* t) {
 	glDeleteTextures(1, &t->texture_id);
 }
 
+#define texture_emit_rotated(tx, ty, x, y, a) cos(a) * (x)-sin(a) * (y) + (tx), sin(a) * (x) + cos(a) * (y) + (ty)
+
+#if defined(OPENGL_ES)
+static void es2_emit_quad(const float* vertices, const float* texcoords, float tex_enabled) {
+	int prog = glx_default_shader_program();
+	glx_use_default_shader();
+	glUniform4fv(glGetUniformLocation(prog, "u_Color"), 1, gles_current_color);
+	glUniform1f(glGetUniformLocation(prog, "u_HasVertexColor"), 0.0F);
+	glUniform1f(glGetUniformLocation(prog, "u_TextureEnabled"), tex_enabled);
+	glUniform1f(glGetUniformLocation(prog, "u_TexCoordScale"), 1.0F);
+	if(tex_enabled > 0.5F)
+		glUniform1i(glGetUniformLocation(prog, "u_Texture"), 0);
+
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, vertices);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, texcoords);
+	glEnableVertexAttribArray(2);
+
+	glDrawArrays(GL_TRIANGLES, 0, 6);
+
+	glDisableVertexAttribArray(0);
+	glDisableVertexAttribArray(2);
+}
+#endif
+
 void texture_draw_sector(struct texture* t, float x, float y, float w, float h, float u, float v, float us, float vs) {
 #if defined(OPENGL_ES)
 	if(gles_version >= 2) {
-		glx_use_default_shader();
-		glUniform4fv(glGetUniformLocation(glx_default_shader_program(), "u_Color"), 1, gles_current_color);
-		glUniform1f(glGetUniformLocation(glx_default_shader_program(), "u_HasVertexColor"), 0.0F);
-		glUniform1f(glGetUniformLocation(glx_default_shader_program(), "u_TextureEnabled"), 1.0F);
-		glUniform1f(glGetUniformLocation(glx_default_shader_program(), "u_TexCoordScale"), 1.0F);
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, t->texture_id);
-		glUniform1i(glGetUniformLocation(glx_default_shader_program(), "u_Texture"), 0);
-
 		float vertices[12] = {x, y, x, y - h, x + w, y - h, x, y, x + w, y - h, x + w, y};
 		float texcoords[12] = {u, v, u, v + vs, u + us, v + vs, u, v, u + us, v + vs, u + us, v};
-
-		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, vertices);
-		glEnableVertexAttribArray(0);
-		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, texcoords);
-		glEnableVertexAttribArray(2);
-
-		glDrawArrays(GL_TRIANGLES, 0, 6);
-
-		glDisableVertexAttribArray(0);
-		glDisableVertexAttribArray(2);
+		es2_emit_quad(vertices, texcoords, 1.0F);
 		return;
 	}
 #endif
@@ -236,6 +245,16 @@ void texture_draw_sector(struct texture* t, float x, float y, float w, float h, 
 }
 
 void texture_draw(struct texture* t, float x, float y, float w, float h) {
+#if defined(OPENGL_ES)
+	if(gles_version >= 2) {
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		texture_draw_sector(t, x, y, w, h, 0.0F, 0.0F, 1.0F, 1.0F);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glDisable(GL_BLEND);
+		return;
+	}
+#endif
 	glEnable(GL_TEXTURE_2D);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -259,6 +278,23 @@ void texture_draw_shadow(struct texture* t, float x, float y, float w, float h) 
 }
 
 void texture_draw_rotated(struct texture* t, float x, float y, float w, float h, float angle) {
+#if defined(OPENGL_ES)
+	if(gles_version >= 2) {
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, t->texture_id);
+		float vertices[12]
+			= {texture_emit_rotated(x, y, -w / 2, h / 2, angle), texture_emit_rotated(x, y, -w / 2, -h / 2, angle),
+			   texture_emit_rotated(x, y, w / 2, -h / 2, angle), texture_emit_rotated(x, y, -w / 2, h / 2, angle),
+			   texture_emit_rotated(x, y, w / 2, -h / 2, angle), texture_emit_rotated(x, y, w / 2, h / 2, angle)};
+		float texcoords[12] = {0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.0F};
+		es2_emit_quad(vertices, texcoords, 1.0F);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		glDisable(GL_BLEND);
+		return;
+	}
+#endif
 	glEnable(GL_TEXTURE_2D);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -272,24 +308,9 @@ void texture_draw_rotated(struct texture* t, float x, float y, float w, float h,
 void texture_draw_empty(float x, float y, float w, float h) {
 #if defined(OPENGL_ES)
 	if(gles_version >= 2) {
-		glx_use_default_shader();
-		glUniform4fv(glGetUniformLocation(glx_default_shader_program(), "u_Color"), 1, gles_current_color);
-		glUniform1f(glGetUniformLocation(glx_default_shader_program(), "u_HasVertexColor"), 0.0F);
-
 		float vertices[12] = {x, y, x, y - h, x + w, y - h, x, y, x + w, y - h, x + w, y};
 		float texcoords[12] = {0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.0F};
-
-		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, vertices);
-		glEnableVertexAttribArray(0);
-		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, texcoords);
-		glEnableVertexAttribArray(2);
-		glUniform1f(glGetUniformLocation(glx_default_shader_program(), "u_TextureEnabled"), 1.0F);
-		glUniform1f(glGetUniformLocation(glx_default_shader_program(), "u_TexCoordScale"), 1.0F);
-
-		glDrawArrays(GL_TRIANGLES, 0, 6);
-
-		glDisableVertexAttribArray(0);
-		glDisableVertexAttribArray(2);
+		es2_emit_quad(vertices, texcoords, 0.0F);
 		return;
 	}
 #endif
@@ -309,32 +330,15 @@ void texture_draw_empty(float x, float y, float w, float h) {
 	glDisableClientState(GL_VERTEX_ARRAY);
 }
 
-#define texture_emit_rotated(tx, ty, x, y, a) cos(a) * (x)-sin(a) * (y) + (tx), sin(a) * (x) + cos(a) * (y) + (ty)
-
 void texture_draw_empty_rotated(float x, float y, float w, float h, float angle) {
 #if defined(OPENGL_ES)
 	if(gles_version >= 2) {
-		glx_use_default_shader();
-		glUniform4fv(glGetUniformLocation(glx_default_shader_program(), "u_Color"), 1, gles_current_color);
-		glUniform1f(glGetUniformLocation(glx_default_shader_program(), "u_HasVertexColor"), 0.0F);
-
 		float vertices[12]
 			= {texture_emit_rotated(x, y, -w / 2, h / 2, angle), texture_emit_rotated(x, y, -w / 2, -h / 2, angle),
 			   texture_emit_rotated(x, y, w / 2, -h / 2, angle), texture_emit_rotated(x, y, -w / 2, h / 2, angle),
 			   texture_emit_rotated(x, y, w / 2, -h / 2, angle), texture_emit_rotated(x, y, w / 2, h / 2, angle)};
 		float texcoords[12] = {0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F, 0.0F};
-
-		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, vertices);
-		glEnableVertexAttribArray(0);
-		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, texcoords);
-		glEnableVertexAttribArray(2);
-		glUniform1f(glGetUniformLocation(glx_default_shader_program(), "u_TextureEnabled"), 1.0F);
-		glUniform1f(glGetUniformLocation(glx_default_shader_program(), "u_TexCoordScale"), 1.0F);
-
-		glDrawArrays(GL_TRIANGLES, 0, 6);
-
-		glDisableVertexAttribArray(0);
-		glDisableVertexAttribArray(2);
+		es2_emit_quad(vertices, texcoords, 0.0F);
 		return;
 	}
 #endif

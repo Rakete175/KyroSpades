@@ -47,25 +47,32 @@ static GLint loc_u_HasVertexColor = -1;
 static GLint loc_u_TextureEnabled = -1;
 static GLint loc_u_Texture = -1;
 static GLint loc_u_TexCoordScale = -1;
-static GLint loc_u_TeamColor = -1;
+static GLint loc_u_Model = -1;
+static GLint loc_u_Camera = -1;
+static GLint loc_u_FogDist = -1;
+static GLint loc_u_FogColor = -1;
 static GLuint quad_vbo = 0;
 static GLuint line_quad_vbo = 0;
 
 static const char* default_vs =
-	"precision highp float;\n"
 	"attribute vec4 a_Position;\n"
 	"attribute vec4 a_Color;\n"
 	"attribute vec2 a_TexCoord;\n"
 	"uniform mat4 u_MVP;\n"
+	"uniform mat4 u_Model;\n"
 	"uniform vec4 u_Color;\n"
 	"uniform float u_HasVertexColor;\n"
 	"uniform float u_TexCoordScale;\n"
-	"uniform vec4 u_TeamColor;\n"
+	"uniform vec3 u_Camera;\n"
+	"uniform float u_FogDist;\n"
 	"varying vec4 v_Color;\n"
 	"varying vec2 v_TexCoord;\n"
+	"varying float v_Fog;\n"
 	"void main() {\n"
-	"    v_Color = mix(u_Color, a_Color, u_HasVertexColor) * u_TeamColor;\n"
+	"    v_Color = mix(u_Color, a_Color, u_HasVertexColor);\n"
 	"    v_TexCoord = a_TexCoord * u_TexCoordScale;\n"
+	"    vec3 world = (u_Model * a_Position).xyz;\n"
+	"    v_Fog = clamp(length(world.xz - u_Camera.xz) * u_FogDist, 0.0, 1.0);\n"
 	"    gl_Position = u_MVP * a_Position;\n"
 	"}\n";
 
@@ -73,11 +80,14 @@ static const char* default_fs =
 	"precision mediump float;\n"
 	"varying vec4 v_Color;\n"
 	"varying vec2 v_TexCoord;\n"
+	"varying float v_Fog;\n"
 	"uniform sampler2D u_Texture;\n"
 	"uniform float u_TextureEnabled;\n"
+	"uniform vec3 u_FogColor;\n"
 	"void main() {\n"
 	"    vec4 tex = texture2D(u_Texture, v_TexCoord);\n"
-	"    gl_FragColor = mix(vec4(1.0), tex, u_TextureEnabled) * v_Color;\n"
+	"    vec4 c = mix(vec4(1.0), tex, u_TextureEnabled) * v_Color;\n"
+	"    gl_FragColor = vec4(mix(c.rgb, u_FogColor, v_Fog), c.a);\n"
 	"}\n";
 #endif
 
@@ -110,20 +120,6 @@ void glx_get_current_color(float* dst) {
 	dst[3] = gles_current_color[3];
 }
 
-void glx_set_team_color(float r, float g, float b) {
-#ifdef OPENGL_ES
-	if(gles_version >= 2) {
-		GLint prog;
-		glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
-		if(prog) {
-			GLint loc = glGetUniformLocation(prog, "u_TeamColor");
-			if(loc >= 0)
-				glUniform4f(loc, r, g, b, 1.0F);
-		}
-	}
-#endif
-}
-
 /* ── GL version detection ────────────────────────────────────────────────── */
 
 static int glx_major_ver() {
@@ -147,14 +143,20 @@ void glx_init() {
 			loc_u_TextureEnabled = glGetUniformLocation(default_shader, "u_TextureEnabled");
 			loc_u_Texture = glGetUniformLocation(default_shader, "u_Texture");
 			loc_u_TexCoordScale = glGetUniformLocation(default_shader, "u_TexCoordScale");
-			loc_u_TeamColor = glGetUniformLocation(default_shader, "u_TeamColor");
+			loc_u_Model = glGetUniformLocation(default_shader, "u_Model");
+			loc_u_Camera = glGetUniformLocation(default_shader, "u_Camera");
+			loc_u_FogDist = glGetUniformLocation(default_shader, "u_FogDist");
+			loc_u_FogColor = glGetUniformLocation(default_shader, "u_FogColor");
 			glUseProgram(default_shader);
 			glUniform1i(loc_u_Texture, 0);
 			glUniform4f(loc_u_Color, 1.0F, 1.0F, 1.0F, 1.0F);
-			glUniform4f(loc_u_TeamColor, 1.0F, 1.0F, 1.0F, 1.0F);
 			glUniform1f(loc_u_HasVertexColor, 0.0F);
 			glUniform1f(loc_u_TextureEnabled, 0.0F);
 			glUniform1f(loc_u_TexCoordScale, 1.0F);
+			glUniformMatrix4fv(loc_u_Model, 1, GL_FALSE, (float[]) {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1});
+			glUniform3f(loc_u_Camera, 0.0F, 0.0F, 0.0F);
+			glUniform1f(loc_u_FogDist, 0.0F);
+			glUniform3f(loc_u_FogColor, 0.0F, 0.0F, 0.0F);
 			glUseProgram(0);
 			log_info("GLES 2.0 default shader compiled (program %u)", default_shader);
 		} else {
@@ -176,19 +178,16 @@ int glx_shader(const char* vertex, const char* fragment) {
 		return 0;
 #endif
 	int v = 0, f = 0;
-	GLint ok;
-
 	if(vertex) {
 		v = glCreateShader(GL_VERTEX_SHADER);
 		glShaderSource(v, 1, (const GLchar* const*)&vertex, NULL);
 		glCompileShader(v);
+		GLint ok;
 		glGetShaderiv(v, GL_COMPILE_STATUS, &ok);
 		if(!ok) {
 			char log[1024];
 			glGetShaderInfoLog(v, sizeof(log), NULL, log);
 			log_error("Vertex shader compile error: %s", log);
-			glDeleteShader(v);
-			return 0;
 		}
 	}
 
@@ -196,14 +195,12 @@ int glx_shader(const char* vertex, const char* fragment) {
 		f = glCreateShader(GL_FRAGMENT_SHADER);
 		glShaderSource(f, 1, (const GLchar* const*)&fragment, NULL);
 		glCompileShader(f);
+		GLint ok;
 		glGetShaderiv(f, GL_COMPILE_STATUS, &ok);
 		if(!ok) {
 			char log[1024];
 			glGetShaderInfoLog(f, sizeof(log), NULL, log);
 			log_error("Fragment shader compile error: %s", log);
-			if(v) glDeleteShader(v);
-			glDeleteShader(f);
-			return 0;
 		}
 	}
 
@@ -218,15 +215,12 @@ int glx_shader(const char* vertex, const char* fragment) {
 	glBindAttribLocation(program, 3, "a_Normal");
 	glLinkProgram(program);
 
-	glGetProgramiv(program, GL_LINK_STATUS, &ok);
-	if(!ok) {
+	GLint linked;
+	glGetProgramiv(program, GL_LINK_STATUS, &linked);
+	if(!linked) {
 		char log[1024];
 		glGetProgramInfoLog(program, sizeof(log), NULL, log);
 		log_error("Shader link error: %s", log);
-		glDeleteProgram(program);
-		if(v) glDeleteShader(v);
-		if(f) glDeleteShader(f);
-		return 0;
 	}
 
 	if(v) glDeleteShader(v);
@@ -709,7 +703,12 @@ void glx_enable_sphericalfog() {
 		glFogf(GL_FOG_END, settings.render_distance);
 		glFogfv(GL_FOG_COLOR, fog_color);
 	}
-	/* ES 2.0: fog handled by shader — nothing to do here */
+	if(gles_version >= 2 && default_shader) {
+		glx_use_default_shader();
+		glUniform1f(loc_u_FogDist, 1.0F / settings.render_distance);
+		glUniform3f(loc_u_FogColor, fog_color[0], fog_color[1], fog_color[2]);
+		glUniform3f(loc_u_Camera, camera_x, camera_y, camera_z);
+	}
 #endif
 	glx_fog = 1;
 }
@@ -740,7 +739,10 @@ void glx_disable_sphericalfog() {
 		float a[4] = {0.2F, 0.2F, 0.2F, 1.0F};
 		glLightModelfv(GL_LIGHT_MODEL_AMBIENT, a);
 	}
-	/* ES 2.0: nothing to undo */
+	if(gles_version >= 2 && default_shader) {
+		glx_use_default_shader();
+		glUniform1f(loc_u_FogDist, 0.0F);
+	}
 #endif
 	glx_fog = 0;
 }

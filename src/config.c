@@ -312,6 +312,10 @@ void config_save() {
 	config_seti("client", "ui_spacing", settings.ui_spacing);
 	config_seti("client", "ui_padding", settings.ui_padding);
 	config_setf("client", "ao_multiplier", settings.ao_multiplier);
+	config_setf("client", "exposure", settings.exposure);
+	config_setf("client", "saturation", settings.saturation);
+	config_setf("client", "contrast", settings.contrast);
+	config_setf("client", "vignette", settings.vignette);
 	config_seti("client", "show_live_player_count", settings.show_live_player_count);
 	config_seti("client", "ads_zoom_animation", settings.ads_zoom_animation);
 	config_seti("client", "auto_demo_recording", settings.auto_demo_recording);
@@ -336,10 +340,6 @@ void config_save() {
 	config_seti("client", "skin_intel", settings.skin_intel);
 	config_seti("client", "skin_tent", settings.skin_tent);
 	config_seti("client", "debug_log", settings.debug_log);
-	config_setf("client", "exposure", settings.exposure);
-	config_setf("client", "saturation", settings.saturation);
-	config_setf("client", "contrast", settings.contrast);
-	config_setf("client", "vignette", settings.vignette);
 
 	config_sets("meta", "backend", CONFIG_BACKEND);
 
@@ -423,6 +423,10 @@ static int config_read_key(void* user, const char* section, const char* name, co
 		IMPORT_SETTING(settings.ui_spacing, ui_spacing, atoi(value));
 		IMPORT_SETTING(settings.ui_padding, ui_padding, atoi(value));
 		IMPORT_SETTING(settings.ao_multiplier, ao_multiplier, fmaxf(0.0F, atof(value)));
+		IMPORT_SETTING(settings.exposure, exposure, fmaxf(-100.0F, fminf(100.0F, atof(value))));
+		IMPORT_SETTING(settings.saturation, saturation, fmaxf(-100.0F, fminf(100.0F, atof(value))));
+		IMPORT_SETTING(settings.contrast, contrast, fmaxf(-100.0F, fminf(100.0F, atof(value))));
+		IMPORT_SETTING(settings.vignette, vignette, fmaxf(0.0F, fminf(100.0F, atof(value))));
 		IMPORT_SETTING(settings.show_live_player_count, show_live_player_count, atoi(value));
 		IMPORT_SETTING(settings.ads_zoom_animation, ads_zoom_animation, atoi(value));
 		IMPORT_SETTING(settings.auto_demo_recording, auto_demo_recording, atoi(value));
@@ -447,10 +451,6 @@ static int config_read_key(void* user, const char* section, const char* name, co
 		IMPORT_SETTING(settings.skin_intel, skin_intel, max(0, atoi(value)));
 		IMPORT_SETTING(settings.skin_tent, skin_tent, max(0, atoi(value)));
 		IMPORT_SETTING(settings.debug_log, debug_log, atoi(value));
-		IMPORT_SETTING(settings.exposure, exposure, atof(value));
-		IMPORT_SETTING(settings.saturation, saturation, atof(value));
-		IMPORT_SETTING(settings.contrast, contrast, atof(value));
-		IMPORT_SETTING(settings.vignette, vignette, fmaxf(0.0F, atof(value)));
 	}
 	if(!strcmp(section, "meta")) {
 		if(!strcmp(name, "backend")) {
@@ -837,7 +837,6 @@ void config_reload() {
 				 .name = "Fullscreen",
 				 .category = "Graphic Settings",
 			 });
-#ifndef OPENGL_ES
 	list_add(&config_settings,
 			 &(struct config_setting) {
 				 .value = &settings_tmp.multisamples,
@@ -855,7 +854,6 @@ void config_reload() {
 				 .label_callback = config_label_msaa,
 				 .category = "Graphic Settings",
 			 });
-#endif
 	list_add(&config_settings,
 			 &(struct config_setting) {
 				 .value = &settings_tmp.voxlap_models,
@@ -896,7 +894,6 @@ void config_reload() {
 				 .name = "Greedy meshing",
 				 .category = "Graphic Settings",
 			 });
-#ifndef OPENGL_ES
 	list_add(&config_settings,
 			 &(struct config_setting) {
 				 .value = &settings_tmp.force_displaylist,
@@ -917,7 +914,6 @@ void config_reload() {
 				 .name = "Smooth fog",
 				 .category = "Graphic Settings",
 			 });
-#endif
 	list_add(&config_settings,
 			 &(struct config_setting) {
 				 .value = &settings_tmp.ambient_occlusion,
@@ -1256,6 +1252,17 @@ void config_reload() {
 				 .help = "Enables multitextured blocks with texture atlas blending",
 				 .name = "Textured Blocks",
 				 .category = "Graphic Settings",
+			 });
+
+	list_add(&config_settings,
+			 &(struct config_setting) {
+				 .value = &settings_tmp.minimap_zoom,
+				 .type = CONFIG_TYPE_INT,
+				 .min = 1,
+				 .max = 5,
+				 .help = "Minimap zoom level (1-5)",
+				 .name = "Minimap zoom",
+				 .category = "HUD/UI Settings",
 			 });
 
 	list_add(&config_settings,

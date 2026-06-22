@@ -2031,8 +2031,8 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 				int zoom_idx = max(0, min(4, settings.minimap_zoom - 1));
 				float viewport = zoom_sizes[zoom_idx];
 				float half_vp = viewport / 2.0F;
-				float view_x = max(0.0F, min(512.0F - viewport, camera_x - half_vp));
-				float view_z = max(0.0F, min(512.0F - viewport, camera_z - half_vp));
+				float view_x = camera_x - half_vp;
+				float view_z = camera_z - half_vp;
 				float map_scale = 128.0F / viewport;
 				char sector_str[3] = {(int)(camera_x / 64.0F) + 'A', (int)(camera_z / 64.0F) + '1', 0};
 				glColor4f(0.F, 0.F, 0.F, 0.7F);
@@ -2074,8 +2074,8 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 					glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
 					glEnable(GL_SCISSOR_TEST);
 					glScissor((int)box_x, (int)(box_top - box_size), (int)ceil(box_size), (int)ceil(box_size));
-				texture_draw(&texture_minimap, box_x - view_x * map_scale * scalef,
-							 box_top + view_z * map_scale * scalef, 512 * map_scale * scalef, 512 * map_scale * scalef);
+					texture_draw(&texture_minimap, box_x - (camera_x - 64.0F) * scalef,
+								 box_top + (camera_z - 64.0F) * scalef, 512 * scalef, 512 * scalef);
 					glDisable(GL_SCISSOR_TEST);
 
 					int gl_err = glGetError();
@@ -2762,6 +2762,11 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 				settings.minimap_zoom++;
 				if(settings.minimap_zoom > 5)
 					settings.minimap_zoom = 1;
+				char zoomstr[64];
+				float zoom_sizes[] = {32.0F, 64.0F, 128.0F, 256.0F, 512.0F};
+				sprintf(zoomstr, "Minimap: %ix%i", (int)zoom_sizes[settings.minimap_zoom - 1],
+						(int)zoom_sizes[settings.minimap_zoom - 1]);
+				chat_add(0, 0x00FFFF, zoomstr);
 			}
 
 			if(key == WINDOW_KEY_COMMAND) {
@@ -4496,12 +4501,15 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
 	}
 
 	if(memcmp(&settings, &settings_tmp, sizeof(struct RENDER_OPTIONS)) != 0) {
-		int textured_changed = settings.textured_blocks != settings_tmp.textured_blocks;
+		int remesh = settings.textured_blocks != settings_tmp.textured_blocks
+			|| settings.ambient_occlusion != settings_tmp.ambient_occlusion
+			|| settings.greedy_meshing != settings_tmp.greedy_meshing
+			|| settings.ao_multiplier != settings_tmp.ao_multiplier;
 		memcpy(&settings, &settings_tmp, sizeof(struct RENDER_OPTIONS));
 		window_fromsettings();
 		sound_volume(settings.volume / 10.0F);
 		config_save();
-		if(textured_changed)
+		if(remesh)
 			chunk_rebuild_all();
 	}
 }

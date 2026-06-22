@@ -184,7 +184,21 @@ static struct font_backed_data* font_find(float h) {
 
 	glGenTextures(1, &f.texture_id);
 	glBindTexture(GL_TEXTURE_2D, f.texture_id);
+#ifdef OPENGL_ES
+	size_t texel_count = (size_t)f.w * (size_t)f.h;
+	unsigned char* rgba = malloc(texel_count * 4);
+	CHECK_ALLOCATION_ERROR(rgba)
+	for(size_t i = 0; i < texel_count; i++) {
+		rgba[i * 4 + 0] = 255;
+		rgba[i * 4 + 1] = 255;
+		rgba[i * 4 + 2] = 255;
+		rgba[i * 4 + 3] = ((const unsigned char*)temp_bitmap)[i];
+	}
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, f.w, f.h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+	free(rgba);
+#else
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, f.w, f.h, 0, GL_ALPHA, GL_UNSIGNED_BYTE, temp_bitmap);
+#endif
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glBindTexture(GL_TEXTURE_2D, 0);
 

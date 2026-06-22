@@ -135,6 +135,9 @@ void matrix_upload() {
 			GLint loc = glGetUniformLocation(prog, "u_MVP");
 			if(loc >= 0)
 				glUniformMatrix4fv(loc, 1, GL_FALSE, (float*)mvp);
+			GLint loc_model = glGetUniformLocation(prog, "u_Model");
+			if(loc_model >= 0)
+				glUniformMatrix4fv(loc_model, 1, GL_FALSE, (float*)matrix_model);
 		}
 		return;
 	}
