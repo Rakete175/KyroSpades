@@ -2031,8 +2031,8 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 				int zoom_idx = max(0, min(4, settings.minimap_zoom - 1));
 				float viewport = zoom_sizes[zoom_idx];
 				float half_vp = viewport / 2.0F;
-				float view_x = camera_x - half_vp;
-				float view_z = camera_z - half_vp;
+				float view_x = max(0.0F, min(512.0F - viewport, camera_x - half_vp));
+				float view_z = max(0.0F, min(512.0F - viewport, camera_z - half_vp));
 				float map_scale = 128.0F / viewport;
 				char sector_str[3] = {(int)(camera_x / 64.0F) + 'A', (int)(camera_z / 64.0F) + '1', 0};
 				glColor4f(0.F, 0.F, 0.F, 0.7F);
@@ -2074,10 +2074,8 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
 					glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
 					glEnable(GL_SCISSOR_TEST);
 					glScissor((int)box_x, (int)(box_top - box_size), (int)ceil(box_size), (int)ceil(box_size));
-				float tex_off_x = max(0.0F, min(384.0F, camera_x - half_vp));
-				float tex_off_y = max(0.0F, min(384.0F, camera_z - half_vp));
-				texture_draw(&texture_minimap, box_x - tex_off_x * scalef,
-							 box_top + tex_off_y * scalef, 512 * scalef, 512 * scalef);
+				texture_draw(&texture_minimap, box_x - view_x * map_scale * scalef,
+							 box_top + view_z * map_scale * scalef, 512 * map_scale * scalef, 512 * map_scale * scalef);
 					glDisable(GL_SCISSOR_TEST);
 
 					int gl_err = glGetError();
