@@ -28,6 +28,7 @@
 #include "common.h"
 #include "log.h"
 #include "file.h"
+#include "window.h"
 
 #if defined(USE_ANDROID_FILE) && defined(__ANDROID__)
 #include <jni.h>
@@ -115,19 +116,12 @@ enum {
 };
 
 void file_url(char* url) {
-	char cmd[strlen(url) + 16];
-#ifdef OS_WINDOWS
-	sprintf(cmd, "start %s", url);
-	system(cmd);
-#endif
-#if defined(OS_LINUX) || defined(OS_APPLE)
-	sprintf(cmd, "xdg-open %s", url);
-	system(cmd);
-#endif
-#ifdef OS_HAIKU
-	sprintf(cmd, "open %s", url);
-	system(cmd);
-#endif
+	/* Legacy entry point. The shell-based implementation was unsafe
+	   (command injection via chat/news URLs that get passed through
+	   system()). Route everything through window_open_url(), which
+	   uses SDL_OpenURL with a safety check on the URL contents
+	   (no control chars, no shell metacharacters). */
+	window_open_url(url);
 }
 
 int file_dir_exists(const char* path) {

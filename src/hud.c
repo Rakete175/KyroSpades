@@ -4391,6 +4391,36 @@ static struct texture* hud_settings_ui_images(int icon_id, bool* resize) {
 static void render_setting_row(mu_Context* ctx, struct config_setting* a, int width) {
         mu_layout_row(ctx, 2, (int[]) {0.65F * width, -1}, 0);
 
+        /* Hover highlight: when the mouse is over this row, draw a tinted
+           band behind the entire row (spanning the panel width) so the user
+           can see which setting they're about to interact with. Mirrors the
+           selected-row highlight in the server list, but driven by mouse
+           hover instead of selection. Peek the next layout cell to learn
+           the row's Y/height, then rewind the layout cursor so the real
+           row content lays out exactly where it would have. */
+        {
+                mu_Layout* lay = &ctx->layout_stack.items[ctx->layout_stack.idx - 1];
+                mu_Layout saved = *lay;
+                mu_Rect cell = mu_layout_next(ctx);
+                *lay = saved; /* undo the slot the peek consumed */
+
+                mu_Container* panel = mu_get_current_container(ctx);
+                mu_Rect row_rect = mu_rect(panel->body.x, cell.y, panel->body.w, cell.h);
+
+                if(mu_mouse_over(ctx, row_rect)) {
+                        /* Dark accent tint (40% of accent color) for the fill,
+                           full accent for the outline — matches the server
+                           list selection style. */
+                        mu_draw_rect(ctx, row_rect,
+                                mu_color(settings.ui_accent_r * 2 / 5,
+                                                 settings.ui_accent_g * 2 / 5,
+                                                 settings.ui_accent_b * 2 / 5, 255));
+                        mu_draw_box(ctx, row_rect,
+                                mu_color(settings.ui_accent_r, settings.ui_accent_g,
+                                                 settings.ui_accent_b, 255));
+                }
+        }
+
         switch(a->type) {
                 case CONFIG_TYPE_STRING:
                         mu_text(ctx, a->name);

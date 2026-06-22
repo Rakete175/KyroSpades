@@ -233,7 +233,8 @@ static const char* config_keyname_from_code(int code) {
 
 #define IMPORT_SETTING_STR(key, ini)            \
     if(!strcmp(name, #ini)) {                   \
-        strcpy(key, value);                     \
+        strncpy(key, value, sizeof(key) - 1);   \
+        key[sizeof(key) - 1] = 0;               \
         return 0;                               \
     }                                           \
 
