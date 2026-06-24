@@ -494,6 +494,28 @@ static void android_set_status_bar_hidden(int hidden) {
 }
 #endif
 
+void window_share_file(const char* path) {
+#ifdef __ANDROID__
+	JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
+	jobject activity = (jobject)SDL_AndroidGetActivity();
+	if(!env || !activity)
+		return;
+	jclass cls = (*env)->GetObjectClass(env, activity);
+	jmethodID mid = (*env)->GetStaticMethodID(env, cls, "shareFile", "(Ljava/lang/String;)V");
+	if(mid) {
+		jstring jpath = (*env)->NewStringUTF(env, path);
+		(*env)->CallStaticVoidMethod(env, cls, mid, jpath);
+		(*env)->DeleteLocalRef(env, jpath);
+	}
+	if((*env)->ExceptionCheck(env))
+		(*env)->ExceptionClear(env);
+	(*env)->DeleteLocalRef(env, cls);
+	(*env)->DeleteLocalRef(env, activity);
+#else
+	(void)path;
+#endif
+}
+
 void window_apply() {
 	if(!window_pending_apply) return;
 	window_pending_apply = 0;

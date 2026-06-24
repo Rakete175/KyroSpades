@@ -152,6 +152,6 @@ android {
 
 dependencies {
     // Unused now that the theme is android:Theme.Black.NoTitleBar.Fullscreen,
-    // but harmless to keep.
+    // but harmless to keep. Also supplies androidx.core (FileProvider) transitively.
     implementation 'com.google.android.material:material:1.9.0'
 }
