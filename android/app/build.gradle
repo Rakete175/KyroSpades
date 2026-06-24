@@ -154,4 +154,6 @@ dependencies {
     // Unused now that the theme is android:Theme.Black.NoTitleBar.Fullscreen,
     // but harmless to keep.
     implementation 'com.google.android.material:material:1.9.0'
+    // FileProvider, used to share demo files via the system share sheet.
+    implementation 'androidx.core:core:1.12.0'
 }

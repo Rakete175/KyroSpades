@@ -4962,7 +4962,13 @@ static void hud_demolist_render(mu_Context* ctx, float scalex, float scaley) {
                         mu_push_id(ctx, &i, sizeof(i));
                         int bw = ctx->text_width(ctx->style->font, "Delete", 0) * 1.6F;
                         int sp = ctx->style->spacing;
+#ifdef __ANDROID__
+                        /* Share exports the demo through the system share sheet,
+                           the only way off the app's sandboxed storage on Android. */
+                        mu_layout_row(ctx, 4, (int[]) {-(bw * 3 + sp * 4 + 1), bw, bw, bw}, 0);
+#else
                         mu_layout_row(ctx, 3, (int[]) {-(bw * 2 + sp * 3 + 1), bw, bw}, 0);
+#endif
                         if(mu_button_ex(ctx, name, 0, MU_OPT_NOFRAME)) {
                                 if(demo_playback_open(demo_files[i])) {
                                         /* Initialize game state for demo playback */
@@ -4973,6 +4979,11 @@ static void hud_demolist_render(mu_Context* ctx, float scalex, float scaley) {
                                         hud_change(&hud_ingame);
                                 }
                         }
+#ifdef __ANDROID__
+                        if(mu_button_ex(ctx, "Share", 0, MU_OPT_NOFRAME)) {
+                                window_share_file(demo_files[i]);
+                        }
+#endif
                         if(mu_button_ex(ctx, "Delete", 0, MU_OPT_NOFRAME)) {
                                 demo_delete_index = i;
                         }
