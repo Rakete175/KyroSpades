@@ -146,6 +146,7 @@ int window_super_down(void);
 int window_shift_down(void);
 void window_cursor_hand(int on);
 void window_open_url(const char* url);
+void window_share_file(const char* path);
 void window_mousemode(int mode);
 void window_mouseloc(double* x, double* y);
 void window_setmouseloc(double x, double y);

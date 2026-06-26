@@ -28,6 +28,7 @@
 #include "common.h"
 #include "log.h"
 #include "file.h"
+#include "window.h"
 
 #if defined(USE_ANDROID_FILE) && defined(__ANDROID__)
 #include <jni.h>
@@ -115,19 +116,12 @@ enum {
 };
 
 void file_url(char* url) {
-	char cmd[strlen(url) + 16];
-#ifdef OS_WINDOWS
-	sprintf(cmd, "start %s", url);
-	system(cmd);
-#endif
-#if defined(OS_LINUX) || defined(OS_APPLE)
-	sprintf(cmd, "xdg-open %s", url);
-	system(cmd);
-#endif
-#ifdef OS_HAIKU
-	sprintf(cmd, "open %s", url);
-	system(cmd);
-#endif
+	/* Legacy entry point. The shell-based implementation was unsafe
+	   (command injection via chat/news URLs that get passed through
+	   system()). Route everything through window_open_url(), which
+	   uses SDL_OpenURL with a safety check on the URL contents
+	   (no control chars, no shell metacharacters). */
+	window_open_url(url);
 }
 
 int file_dir_exists(const char* path) {
@@ -239,12 +233,19 @@ unsigned char* file_load(const char* name) {
 void* file_open(const char* name, const char* mode) {
 #ifdef USE_ANDROID_FILE
 	struct file_handle* handle = malloc(sizeof(struct file_handle));
-	handle->internal = (strchr(mode, 'r') != NULL) ? SDL_RWFromFile(name, mode) : NULL;
-	handle->type = FILE_SDL;
+	/* Real filesystem first, relative to the writable CWD set in main();
+	   this also holds anything previously saved (config.ini, demos, ...). */
+	handle->internal = fopen(name, mode);
+	handle->type = FILE_STD;
+
+	/* APK assets are invisible to fopen(), so reads fall back to SDL. */
+	if(!handle->internal && strchr(mode, 'r') != NULL) {
+		handle->internal = SDL_RWFromFile(name, mode);
+		handle->type = FILE_SDL;
+	}
+
 	if(!handle->internal) {
-		/* Legacy fallback: older builds stored data in a fixed /sdcard path
-		   instead of the app's private storage (which main() now chdir()s
-		   into). Kept so files from old installs remain readable. */
+		/* Legacy /sdcard location from old installs. */
 		char str[256];
 		snprintf(str, sizeof(str), "/sdcard/KyroSpades/%s", name);
 		handle->internal = fopen(str, mode);
@@ -274,7 +275,6 @@ void file_printf(void* file, const char* fmt, ...) {
 			written += SDL_RWwrite((struct SDL_RWops*)f->internal, str + written, 1, total - written);
 	}
 	if(f->type == FILE_STD) {
-		log_warn("%i %i", f->internal, f);
 		vfprintf((FILE*)f->internal, fmt, args);
 	}
 #else
