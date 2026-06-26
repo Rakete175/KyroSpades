@@ -3629,6 +3629,7 @@ static http_t* request_news = NULL;
 static int server_count = 0;
 static int player_count = 0;
 static struct serverlist_entry* serverlist;
+static int serverlist_source = 0;
 static int serverlist_is_outdated;
 static int serverlist_checked_for_updates = 0;
 static int serverlist_con_established;
@@ -3680,7 +3681,8 @@ static void hud_serverlist_init() {
         server_count = 0;
         serverlist_selected[0] = '\0';
         serverlist_join_pending = false;
-        request_serverlist = http_get("http://services.buildandshoot.com/serverlist.json", NULL);
+        const char* url = serverlist_source == 0 ? "http://services.buildandshoot.com/serverlist.json" : "http://checkpoint.aos.coffee/serverlist.json";
+        request_serverlist = http_get(url, NULL);
 #ifdef JENKINS_BUILD
         if (!serverlist_checked_for_updates) {
                 serverlist_is_outdated = 0;
@@ -4106,6 +4108,14 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
                 mu_layout_row(ctx, 1, (int[]) {-1}, -1);
 
                 mu_begin_panel(ctx, "Servers");
+                mu_layout_row(ctx, 1, (int[]) {-1}, 0);
+                char source_label[64];
+                sprintf(source_label, "Serverlist: %s", serverlist_source == 0 ? "Master" : "checkpoint.aos.coffee");
+                if(mu_button(ctx, source_label)) {
+                        serverlist_source = !serverlist_source;
+                        hud_serverlist_init();
+                }
+
                 int width = mu_get_current_container(ctx)->body.w;
 
                 int flag_width = ctx->style->size.y + ctx->style->padding * 2;
@@ -4381,6 +4391,13 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
                 switch(http_process(request_serverlist)) {
                         case HTTP_STATUS_PENDING: render_status_icon = 1; break;
                         case HTTP_STATUS_COMPLETED: {
+                                if(serverlist_source != 0) {
+                                        void* f = file_open("serverlist_debug.txt", "w");
+                                        if(f) {
+                                                file_printf(f, "%s", request_serverlist->response_data);
+                                                file_close(f);
+                                        }
+                                }
                                 JSON_Value* js = json_parse_string(request_serverlist->response_data);
                                 JSON_Array* servers = json_value_get_array(js);
                                 server_count = json_array_get_count(servers);
