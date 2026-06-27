@@ -115,6 +115,7 @@ void hud_init() {
         hud_chatlog.ctx = malloc(sizeof(mu_Context));
         hud_demolist.ctx = malloc(sizeof(mu_Context));
         hud_skins.ctx = malloc(sizeof(mu_Context));
+        hud_macros.ctx = malloc(sizeof(mu_Context));
 
         hud_change(&hud_serverlist);
 }
@@ -2732,6 +2733,25 @@ static const char* hud_ingame_completeword(const char* s) {
 }
 
 static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
+        if(action == WINDOW_PRESS && internal > 0) {
+                for(int i = 0; i < list_size(&config_macros); i++) {
+                        struct config_macro* m = list_get(&config_macros, i);
+                        if(internal == m->key && m->text[0]) {
+                                struct PacketChatMessage msg;
+                                msg.player_id = local_player_id;
+                                msg.chat_type = CHAT_ALL;
+                                strncpy(msg.message, m->text, sizeof(msg.message) - 1);
+                                msg.message[sizeof(msg.message) - 1] = '\0';
+                                for(size_t i = 0; msg.message[i]; i++)
+                                        if(msg.message[i] == '\n') msg.message[i] = ' ';
+                                network_send(PACKET_CHATMESSAGE_ID, &msg,
+                                        sizeof(msg) - sizeof(msg.message) + strlen(m->text) + 1);
+                                sound_create(SOUND_LOCAL, &sound_chat, 0.0F, 0.0F, 0.0F);
+                                chat_add(2, 0, m->text);
+                                return;
+                        }
+                }
+        }
         if(chat_input_mode != CHAT_NO_INPUT && action == WINDOW_PRESS && key == WINDOW_KEY_TAB && strlen(chat[0][0]) > 0) {
                 // autocomplete word
                 char* incomplete = strrchr(chat[0][0], ' ') + 1;
@@ -3936,6 +3956,46 @@ static void hud_nav_button(mu_Context* ctx, struct hud* hud_struct, const char* 
         }
 }
 
+void hud_common_sidebar(mu_Context* ctx, float scalex, float scaley) {
+        int sidebar_w = (int)(160 * scalex);
+
+        mu_layout_row(ctx, 2, (int[]) {sidebar_w, -1}, -1);
+
+        mu_begin_panel(ctx, "Navigation");
+        mu_layout_row(ctx, 1, (int[]) {-1}, 0);
+
+        if(!network_connected)
+                hud_nav_button(ctx, &hud_serverlist, "Servers");
+
+        hud_nav_button(ctx, &hud_settings, "Settings");
+        hud_nav_button(ctx, &hud_controls, "Controls");
+        hud_nav_button(ctx, &hud_skins, "Skins");
+        hud_nav_button(ctx, &hud_macros, "Macros");
+
+        if(!network_connected)
+                hud_nav_button(ctx, &hud_demolist, "Demos");
+
+        if(network_connected)
+                hud_nav_button(ctx, &hud_chatlog, "Chat Log");
+
+        if(serverlist_is_outdated) {
+                mu_text_color(ctx, 255, 255, 60);
+                if(mu_button(ctx, "New updates"))
+                        show_update_popup = 1;
+                mu_text_color_default(ctx);
+        }
+
+        mu_text_color(ctx, 255, 60, 60);
+        if(mu_button(ctx, network_connected ? "Disconnect" : "Exit"))
+                if(network_connected)
+                        hud_change(&hud_serverlist);
+                else
+                        exit(0);
+        mu_text_color_default(ctx);
+
+        mu_end_panel(ctx);
+}
+
 static void hud_common_nav(mu_Context* ctx, mu_Rect* frame, float scalex, float scaley) {
         mu_Container* cnt = mu_get_current_container(ctx);
         cnt->rect = *frame;
@@ -4042,14 +4102,15 @@ static void hud_common_nav(mu_Context* ctx, mu_Rect* frame, float scalex, float 
 static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
         hud_common_render(ctx);
 
-        /* Widened from a 1024px cap / 75% of the window: on wide phone/tablet
-           screens the old cap left the list covering only ~half the screen and
-           squeezed the nav row. Kept conservative on purpose. */
-        float frame_w = fminf(1280.F, settings.window_width * 0.8F);
-        mu_Rect frame = mu_rect(settings.window_width / 2.F - frame_w / 2.F, 0, frame_w, settings.window_height);
+        mu_Rect frame = mu_rect(0, 0, settings.window_width, settings.window_height);
 
         if(mu_begin_window_ex(ctx, "Main", frame, MU_OPT_NOFRAME | MU_OPT_NOTITLE | MU_OPT_NORESIZE)) {
-                hud_common_nav(ctx, &frame, scalex, scaley);
+                mu_Container* cnt = mu_get_current_container(ctx);
+                cnt->rect = frame;
+
+                hud_common_sidebar(ctx, scalex, scaley);
+
+                mu_begin_panel(ctx, "Content");
 
                 mu_layout_row(ctx, 1, (int[]) {-1}, settings.window_height * 0.3F);
 
@@ -4119,9 +4180,6 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
                 int width = mu_get_current_container(ctx)->body.w;
 
                 int flag_width = ctx->style->size.y + ctx->style->padding * 2;
-                /* The first column must never be narrower than its own header text:
-                   the old fixed 82px cap was tuned for the 1x font and truncated
-                   "Players" at larger UI scales. */
                 int players_w = ctx->text_width(ctx->style->font, "Players", 0) + ctx->style->padding * 2;
                 int col0_w = fminf(82.F * hud_ui_scale(), 0.12F * width);
                 if(col0_w < players_w)
@@ -4179,25 +4237,15 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
 
                                 bool is_selected = strcmp(serverlist_selected, serverlist[k].identifier) == 0;
 
-                                /* The selected row keeps full text brightness: the dimming for
-                                   empty servers (f == 2) has too little contrast against the
-                                   highlight band. */
                                 if(is_selected)
                                         f = 1;
 
-                                /* Draw a persistent highlight band behind the currently selected
-                                   row so the user can see what their first tap picked. Peek the
-                                   row's rect, then restore the layout cursor so the real buttons
-                                   lay out exactly where they would have. The band is drawn first
-                                   so the row's text/icons render on top of it. A dark accent
-                                   tint is used instead of MU_COLOR_BUTTONHOVER, whose light
-                                   gray washed out the row text. */
                                 if(is_selected) {
                                         mu_Container* panel = mu_get_current_container(ctx);
                                         mu_Layout* lay = &ctx->layout_stack.items[ctx->layout_stack.idx - 1];
                                         mu_Layout saved = *lay;
                                         mu_Rect cell = mu_layout_next(ctx);
-                                        *lay = saved; /* rewind: undo the slot the peek consumed */
+                                        *lay = saved;
                                         mu_Rect band = mu_rect(panel->body.x, cell.y, panel->body.w, cell.h);
                                         mu_draw_rect(ctx, band,
                                                 mu_color(settings.ui_accent_r * 2 / 5, settings.ui_accent_g * 2 / 5,
@@ -4257,8 +4305,6 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
                                 if(tapped) {
                                         any_row_tapped = true;
                                         if(is_selected) {
-                                                /* second tap on the already-selected row: join it
-                                                   (after this frame finished rendering) */
                                                 serverlist_selected[0] = '\0';
                                                 strncpy(serverlist_join_addr, serverlist[k].identifier,
                                                                 sizeof(serverlist_join_addr) - 1);
@@ -4269,7 +4315,6 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
                                                 serverlist_join_has_name = true;
                                                 serverlist_join_pending = true;
                                         } else {
-                                                /* first tap: just highlight this row */
                                                 strncpy(serverlist_selected, serverlist[k].identifier,
                                                                 sizeof(serverlist_selected) - 1);
                                                 serverlist_selected[sizeof(serverlist_selected) - 1] = '\0';
@@ -4284,15 +4329,13 @@ static void hud_serverlist_render(mu_Context* ctx, float scalex, float scaley) {
                 }
                 pthread_mutex_unlock(&serverlist_lock);
 
-                /* A tap inside the server panel that didn't land on any row clears the
-                   selection. ctx->mouse_pressed is set on the frame the tap's click is
-                   processed; mu_mouse_over confines this to taps within the list area so
-                   nav-bar / header clicks don't wipe the highlight. */
                 if(ctx->mouse_pressed == MU_MOUSE_LEFT && !any_row_tapped
                    && mu_mouse_over(ctx, mu_get_current_container(ctx)->body))
                         serverlist_selected[0] = '\0';
 
                 mu_text_color_default(ctx);
+                mu_end_panel(ctx);
+
                 mu_end_panel(ctx);
 
                 mu_end_window(ctx);
@@ -4638,7 +4681,9 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
                 mu_Container* cnt = mu_get_current_container(ctx);
                 cnt->rect = frame;
 
-                hud_common_nav(ctx, &frame, scalex, scaley);
+                hud_common_sidebar(ctx, scalex, scaley);
+
+                mu_begin_panel(ctx, "Content");
 
                 mu_layout_row(ctx, 2, (int[]) {150, -1}, -1);
 
@@ -4683,6 +4728,8 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
                         if(setting_in_category(a, selected_category))
                                 render_setting_row(ctx, a, width);
                 }
+
+                mu_end_panel(ctx);
 
                 mu_end_panel(ctx);
 
@@ -4769,7 +4816,9 @@ static void hud_skins_render(mu_Context* ctx, float scalex, float scaley) {
                 mu_Container* cnt = mu_get_current_container(ctx);
                 cnt->rect = frame;
 
-                hud_common_nav(ctx, &frame, scalex, scaley);
+                hud_common_sidebar(ctx, scalex, scaley);
+
+                mu_begin_panel(ctx, "Content");
 
                 mu_layout_row(ctx, 2, (int[]) {150, -1}, -1);
 
@@ -4888,6 +4937,8 @@ static void hud_skins_render(mu_Context* ctx, float scalex, float scaley) {
 
                 mu_end_panel(ctx);
 
+                mu_end_panel(ctx);
+
                 mu_end_window(ctx);
         }
 
@@ -4938,6 +4989,7 @@ struct hud hud_skins = {
 /*         HUD_CONTROLS START        */
 
 static struct config_key_pair* hud_controls_edit;
+static int macro_edit_index = -1;
 
 static void hud_controls_init() {
         hud_controls_edit = NULL;
@@ -4960,10 +5012,12 @@ static void hud_demolist_init(void) {
 
 static void hud_demolist_render(mu_Context* ctx, float scalex, float scaley) {
         hud_common_render(ctx);
-        mu_Rect frame = mu_rect(settings.window_width/2.F - fminf(1024.F,settings.window_width*0.75F)/2.F, 0,
-                fminf(1024.F,settings.window_width*0.75F), settings.window_height);
+        mu_Rect frame = mu_rect(0, 0, settings.window_width, settings.window_height);
         if(mu_begin_window_ex(ctx, "Demos", frame, MU_OPT_NOFRAME|MU_OPT_NOTITLE|MU_OPT_NORESIZE)) {
-                hud_common_nav(ctx, &frame, scalex, scaley);
+                mu_Container* cnt = mu_get_current_container(ctx);
+                cnt->rect = frame;
+                hud_common_sidebar(ctx, scalex, scaley);
+                mu_begin_panel(ctx, "Content");
                 int rb = ctx->text_width(ctx->style->font, "Refresh", 0) * 1.6F;
                 mu_layout_row(ctx, 2, (int[]) {-rb, -1}, 0);
                 char count_str[64];
@@ -5018,6 +5072,7 @@ static void hud_demolist_render(mu_Context* ctx, float scalex, float scaley) {
                         mu_button_ex(ctx, "Use auto-record in Settings, or drop .demo files into demos/",
                                 0, MU_OPT_NOFRAME|MU_OPT_ALIGNCENTER|MU_OPT_NOINTERACT);
                 }
+                mu_end_panel(ctx);
                 mu_end_panel(ctx); mu_end_window(ctx);
         }
 
@@ -5097,13 +5152,15 @@ struct hud hud_demolist = { hud_demolist_init, NULL, hud_demolist_render, hud_de
 static void hud_controls_render(mu_Context* ctx, float scalex, float scaley) {
         hud_common_render(ctx);
 
-        mu_Rect frame = mu_rect(settings.window_width / 2.F - fminf(1024.F, settings.window_width * 0.75F) / 2.F, 0, fminf(1024.F, settings.window_width * 0.75F), settings.window_height);
+        mu_Rect frame = mu_rect(0, 0, settings.window_width, settings.window_height);
 
         if(mu_begin_window_ex(ctx, "Main", frame, MU_OPT_NOFRAME | MU_OPT_NOTITLE | MU_OPT_NORESIZE)) {
                 mu_Container* cnt = mu_get_current_container(ctx);
                 cnt->rect = frame;
 
-                hud_common_nav(ctx, &frame, scalex, scaley);
+                hud_common_sidebar(ctx, scalex, scaley);
+
+                mu_begin_panel(ctx, "ControlsContent");
 
                 mu_layout_row(ctx, 1, (int[]) {-1}, -1);
 
@@ -5175,6 +5232,8 @@ static void hud_controls_render(mu_Context* ctx, float scalex, float scaley) {
 
                 mu_end_panel(ctx);
 
+                mu_end_panel(ctx);
+
                 mu_end_window(ctx);
         }
 }
@@ -5212,10 +5271,117 @@ struct hud hud_controls = {
         NULL,
 };
 
+/*         HUD_MACROS START        */
+
+static void hud_macros_init(void) {
+        macro_edit_index = -1;
+}
+
+static void hud_macros_touch(void* finger, int action, float x, float y, float dx, float dy) {
+        (void)finger;
+        window_setmouseloc(x, y);
+        if(action == TOUCH_MOVE && hud_macros.ctx)
+                mu_input_scroll(hud_macros.ctx, 0, (int)(-dy));
+}
+
+static void hud_macros_keyboard(int key, int action, int mods, int internal) {
+        if(macro_edit_index >= 0 && action == WINDOW_PRESS
+           && hud_macros.ctx && hud_macros.ctx->focus == 0) {
+                struct config_macro* m = list_get(&config_macros, macro_edit_index);
+                m->key = internal;
+                macro_edit_index = -1;
+                config_save();
+                return;
+        }
+        if(key == WINDOW_KEY_ESCAPE && action == WINDOW_PRESS) {
+                hud_change(&hud_serverlist);
+        }
+}
+
+static void hud_macros_render(mu_Context* ctx, float scalex, float scaley) {
+        hud_common_render(ctx);
+        mu_Rect frame = mu_rect(0, 0, settings.window_width, settings.window_height);
+        if(mu_begin_window_ex(ctx, "Main", frame, MU_OPT_NOFRAME | MU_OPT_NOTITLE | MU_OPT_NORESIZE)) {
+                mu_Container* cnt = mu_get_current_container(ctx);
+                cnt->rect = frame;
+                hud_common_sidebar(ctx, scalex, scaley);
+                mu_begin_panel(ctx, "Content");
+                mu_layout_row(ctx, 1, (int[]) {-1}, 0);
+                if(mu_button(ctx, "+ Add macro")) {
+                        struct config_macro new_macro = {0};
+                        list_add(&config_macros, &new_macro);
+                        macro_edit_index = list_size(&config_macros) - 1;
+                        config_save();
+                }
+                mu_layout_row(ctx, 1, (int[]) {-1}, -1);
+                mu_begin_panel(ctx, "MacrosList");
+                int width = mu_get_current_container(ctx)->body.w;
+                int spacing = ctx->style->spacing;
+                int del_w = (int)(ctx->text_width(ctx->style->font, "x", 0) * 2.0F);
+                int key_w = (int)(ctx->text_width(ctx->style->font, "Unbound", 0) + ctx->style->padding * 2);
+                int col2_total = key_w + del_w;
+                if(col2_total > width * 0.35F) {
+                        col2_total = (int)(width * 0.35F);
+                        key_w = col2_total - del_w;
+                }
+                int col1_w = width - col2_total - spacing * 2;
+                if(col1_w < 1) col1_w = 1;
+                mu_layout_row(ctx, 2, (int[]) {col1_w, col2_total}, 0);
+                mu_button_ex(ctx, "String", 0, MU_OPT_ALIGNCENTER);
+                mu_button_ex(ctx, "Keybind", 0, MU_OPT_ALIGNCENTER);
+                for(int k = 0; k < list_size(&config_macros); k++) {
+                        struct config_macro* m = list_get(&config_macros, k);
+                        mu_push_id(ctx, &k, sizeof(k));
+                        char key_label[64];
+                        if(m->key > 0) {
+                                window_keyname(m->key, key_label, sizeof(key_label));
+                        } else {
+                                strcpy(key_label, "Unbound");
+                        }
+                        mu_layout_row(ctx, 3, (int[]) {col1_w, key_w, del_w}, 0);
+                        hud_textbox(ctx, m->text, sizeof(m->text), 0);
+                        if(macro_edit_index == k) {
+                                mu_text_color(ctx, 255, 0, 0);
+                                mu_button_ex(ctx, "...", 0, MU_OPT_NOINTERACT);
+                                mu_text_color_default(ctx);
+                        } else {
+                                if(mu_button(ctx, key_label))
+                                        macro_edit_index = k;
+                        }
+                        mu_text_color(ctx, 255, 60, 60);
+                        if(mu_button(ctx, "x")) {
+                                list_remove(&config_macros, k);
+                                macro_edit_index = -1;
+                                config_save();
+                        }
+                        mu_text_color_default(ctx);
+                        mu_pop_id(ctx);
+                }
+                mu_end_panel(ctx);
+                mu_end_panel(ctx);
+                mu_end_window(ctx);
+        }
+}
+
+struct hud hud_macros = {
+        hud_macros_init,
+        NULL,
+        hud_macros_render,
+        hud_macros_keyboard,
+        NULL,
+        NULL,
+        NULL,
+        hud_macros_touch,
+        NULL,
+        0,
+        0,
+        NULL,
+};
+
 void hud_common_render_for_chatlog(mu_Context* ctx) {
         hud_common_render(ctx);
 }
 
-void hud_common_nav_for_chatlog(mu_Context* ctx, mu_Rect* frame, float scalex, float scaley) {
-        hud_common_nav(ctx, frame, scalex, scaley);
+void hud_common_sidebar_for_chatlog(mu_Context* ctx, float scalex, float scaley) {
+        hud_common_sidebar(ctx, scalex, scaley);
 }

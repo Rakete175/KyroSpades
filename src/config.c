@@ -35,6 +35,7 @@
 
 struct RENDER_OPTIONS settings, settings_tmp;
 struct list config_keys;
+struct list config_macros;
 struct list config_settings;
 
 struct list config_file;
@@ -343,6 +344,19 @@ void config_save() {
 
         config_sets("meta", "backend", CONFIG_BACKEND);
 
+        for(int k = 0; k < list_size(&config_macros); k++) {
+                struct config_macro* m = list_get(&config_macros, k);
+                char buf[64];
+                snprintf(buf, sizeof(buf), "macro_%d_key", k);
+                const char* kn = config_keyname_from_code(m->key);
+                if(kn)
+                        config_sets("macros", buf, kn);
+                else
+                        config_seti("macros", buf, m->key);
+                snprintf(buf, sizeof(buf), "macro_%d_text", k);
+                config_sets("macros", buf, m->text);
+        }
+
         for(int k = 0; k < list_size(&config_keys); k++) {
                 struct config_key_pair* e = list_get(&config_keys, k);
                 if(strlen(e->name) > 0) {
@@ -456,6 +470,26 @@ static int config_read_key(void* user, const char* section, const char* name, co
                         strncpy(config_file_backend, value, sizeof(config_file_backend) - 1);
                         config_file_backend[sizeof(config_file_backend) - 1] = 0;
                 }
+        }
+        if(!strcmp(section, "macros")) {
+                int idx;
+                char type;
+                if(sscanf(name, "macro_%d_%c", &idx, &type) == 2) {
+                        while(list_size(&config_macros) <= idx)
+                                list_add(&config_macros, &(struct config_macro){0});
+                        struct config_macro* m = list_get(&config_macros, idx);
+                        if(type == 'k') {
+                                int code = config_keyname_to_code(value);
+                                if(code >= 0)
+                                        m->key = code;
+                                else
+                                        m->key = atoi(value);
+                        } else if(type == 't') {
+                                strncpy(m->text, value, sizeof(m->text) - 1);
+                                m->text[sizeof(m->text) - 1] = '\0';
+                        }
+                }
+                return 0;
         }
         if(!strcmp(section, "controls")) {
                 for(int k = 0; k < list_size(&config_keys); k++) {
@@ -587,6 +621,11 @@ void config_reload() {
                 list_create(&config_keys, sizeof(struct config_key_pair));
         else
                 list_clear(&config_keys);
+
+        if(!list_created(&config_macros))
+                list_create(&config_macros, sizeof(struct config_macro));
+        else
+                list_clear(&config_macros);
 
 #ifdef USE_SDL
         config_register_key(WINDOW_KEY_UP, SDLK_w, "move_forward", 0, "Forward", "Movement");

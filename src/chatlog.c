@@ -36,7 +36,7 @@
 #include "texture.h"
 
 void hud_common_render_for_chatlog(mu_Context* ctx);
-void hud_common_nav_for_chatlog(mu_Context* ctx, mu_Rect* frame, float scalex, float scaley);
+void hud_common_sidebar_for_chatlog(mu_Context* ctx, float scalex, float scaley);
 static void resolve_mouse_target(mu_Context* ctx, int* out_line, int* out_char);
 
 #define CHATLOG_MAX_LINES 2048
@@ -1685,18 +1685,15 @@ static void hud_chatlog_render(mu_Context* ctx, float scalex, float scaley) {
 	chathistory_poll();
 	hud_common_render_for_chatlog(ctx);
 
-	mu_Rect frame = mu_rect(
-		settings.window_width / 2.F - fminf(1024.F, settings.window_width * 0.75F) / 2.F,
-		0,
-		fminf(1024.F, settings.window_width * 0.75F),
-		settings.window_height
-	);
+	mu_Rect frame = mu_rect(0, 0, settings.window_width, settings.window_height);
 
 	if(mu_begin_window_ex(ctx, "Main", frame, MU_OPT_NOFRAME | MU_OPT_NOTITLE | MU_OPT_NORESIZE)) {
 		mu_Container* cnt = mu_get_current_container(ctx);
 		cnt->rect = frame;
 
-		hud_common_nav_for_chatlog(ctx, &frame, scalex, scaley);
+		hud_common_sidebar_for_chatlog(ctx, scalex, scaley);
+
+		mu_begin_panel(ctx, "Content");
 
 		/* Search bar lives above the filter banner so both can stack
 		   visibly when the user is filtering AND searching at once -
@@ -1961,6 +1958,7 @@ static void hud_chatlog_render(mu_Context* ctx, float scalex, float scaley) {
 			}
 			search_pending_scroll = -1;
 		}
+		mu_end_panel(ctx);
 		mu_end_window(ctx);
 	}
 

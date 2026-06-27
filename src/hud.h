@@ -63,6 +63,7 @@ extern struct hud hud_controls;
 extern struct hud hud_chatlog;
 extern struct hud hud_demolist;
 extern struct hud hud_skins;
+extern struct hud hud_macros;
 
 extern struct hud* hud_active;
 extern struct window_instance* hud_window;
@@ -75,6 +76,7 @@ void hud_init();
 void hud_ime_update();
 void hud_mousemode(int mode);
 int hud_accent_color();
+void hud_common_sidebar(mu_Context* ctx, float scalex, float scaley);
 
 extern int player_stats_blocks_placed;
 extern int player_stats_kills;

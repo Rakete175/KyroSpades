@@ -111,6 +111,13 @@ extern struct RENDER_OPTIONS {
 
 extern struct list config_keys;
 
+struct config_macro {
+        int key;
+        char text[256];
+};
+
+extern struct list config_macros;
+
 struct config_key_pair {
 	int internal;
 	int def;
