@@ -416,12 +416,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: release
-          name: Latest Windows, Linux and macOS Build
+          name: Latest Win Mac Linux & Android Build
           files: |
             release-artifacts/KyroSpades-win64.zip
             release-artifacts/KyroSpades Linux.zip
             release-artifacts/KyroSpades MacOS.zip
             release-artifacts/KyroSpades Android.apk
-          body: Latest version of the game compiled for Windows, Linux and macOS.
+          body: Latest version of the game compiled for Windows, Linux, Android and macOS.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
