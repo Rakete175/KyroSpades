@@ -57,6 +57,8 @@ jobs:
             mingw-w64-ucrt-x86_64-openal
             mingw-w64-ucrt-x86_64-enet
             mingw-w64-ucrt-x86_64-libdeflate
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-python
             zip
             make
@@ -127,7 +129,7 @@ jobs:
 
       - name: Install build tools (macOS)
         if: matrix.platform == 'macos'
-        run: brew install cmake pkg-config
+        run: brew install cmake pkg-config ffmpeg
 
       - name: Build dependencies from source (macOS)
         if: matrix.platform == 'macos'
