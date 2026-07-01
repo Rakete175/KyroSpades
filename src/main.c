@@ -1284,9 +1284,6 @@ int main(int argc, char** argv) {
         settings_tmp.recording_fps = settings.recording_fps;
         settings_tmp.recording_bitrate_kbps = settings.recording_bitrate_kbps;
 
-        if(settings.replay_enabled)
-                recorder_buffer_start();
-
         if(settings.debug_log) {
                 log_set_level(LOG_TRACE);
                 log_info("Debug logging enabled (LOG_TRACE)");
@@ -1318,6 +1315,9 @@ int main(int argc, char** argv) {
         init();
         recorder_init();
         atexit(deinit);
+
+        if(settings.replay_enabled)
+                recorder_buffer_start();
 
         if(settings.vsync < 2)
                 window_swapping(settings.vsync);
