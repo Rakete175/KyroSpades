@@ -592,217 +592,186 @@ void chunk_generate_greedy(struct libvxl_chunk_copy* blocks, size_t start_x, siz
 //-Z = 0.875
 
 // credit: https://0fps.net/2013/07/03/ambient-occlusion-for-minecraft-like-worlds/
-static float vertexAO(int side1, int side2, int corner, const float* ao_curve) {
-        if(!side1 && !side2) {
-                return ao_curve[1];
-        }
+// returns index into ao_curve / color LUT (1..4)
+static __attribute__((always_inline)) inline int vertexAO_idx(int side1, int side2, int corner) {
+	if(!side1 && !side2)
+		return 1;
 
-        return ao_curve[4 - (!side1 + !side2 + !corner)];
+	return 4 - (!side1 + !side2 + !corner);
 }
 
 void chunk_generate_naive(struct libvxl_chunk_copy* blocks, struct tesselator* tess, int* max_height, int ao) {
-        *max_height = 0;
-        float ao_mult = settings.ao_multiplier > 0.0F ? settings.ao_multiplier : 1.0F;
-        float ao_curve[5];
-        ao_curve[1] = powf(0.25F, ao_mult);
-        ao_curve[2] = powf(0.50F, ao_mult);
-        ao_curve[3] = powf(0.75F, ao_mult);
-        ao_curve[4] = 1.0F;
+	*max_height = 0;
+	float ao_mult = settings.ao_multiplier > 0.0F ? settings.ao_multiplier : 1.0F;
+	float ao_curve[5];
+	ao_curve[1] = powf(0.25F, ao_mult);
+	ao_curve[2] = powf(0.50F, ao_mult);
+	ao_curve[3] = powf(0.75F, ao_mult);
+	ao_curve[4] = 1.0F;
 
-        for(size_t k = 0; k < blocks->blocks_sorted_count; k++) {
-                struct libvxl_block* blk = blocks->blocks_sorted + k;
+	for(size_t k = 0; k < blocks->blocks_sorted_count; k++) {
+		struct libvxl_block* blk = blocks->blocks_sorted + k;
 
-                int x = key_getx(blk->position);
-                int y = map_size_y - 1 - key_getz(blk->position);
-                int z = key_gety(blk->position);
+		int x = key_getx(blk->position);
+		int y = map_size_y - 1 - key_getz(blk->position);
+		int z = key_gety(blk->position);
 
-                *max_height = max(*max_height, y);
+		*max_height = max(*max_height, y);
 
-                uint32_t col = blk->color;
-                int r = blue(col);
-                int g = green(col);
-                int b = red(col);
+		uint32_t col = blk->color;
+		int r = blue(col);
+		int g = green(col);
+		int b = red(col);
 
-                float shade = solid_sunblock(blocks, x, y, z);
-                r *= shade;
-                g *= shade;
-                b *= shade;
+		float shade = solid_sunblock(blocks, x, y, z);
+		r *= shade;
+		g *= shade;
+		b *= shade;
 
-                if(solid_array_isair(blocks, x, y, z - 1)) {
-                        if(ao) {
-                                float A
-                                        = vertexAO(solid_array_isair(blocks, x - 1, y, z - 1), solid_array_isair(blocks, x, y - 1, z - 1),
-                                                           solid_array_isair(blocks, x - 1, y - 1, z - 1), ao_curve);
-                                float B
-                                        = vertexAO(solid_array_isair(blocks, x - 1, y, z - 1), solid_array_isair(blocks, x, y + 1, z - 1),
-                                                           solid_array_isair(blocks, x - 1, y + 1, z - 1), ao_curve);
-                                float C
-                                        = vertexAO(solid_array_isair(blocks, x + 1, y, z - 1), solid_array_isair(blocks, x, y + 1, z - 1),
-                                                           solid_array_isair(blocks, x + 1, y + 1, z - 1), ao_curve);
-                                float D
-                                        = vertexAO(solid_array_isair(blocks, x + 1, y, z - 1), solid_array_isair(blocks, x, y - 1, z - 1),
-                                                           solid_array_isair(blocks, x + 1, y - 1, z - 1), ao_curve);
+		if(ao) {
+			// wrap x/z once per block instead of per neighbor lookup
+			uint32_t X[3] = {(uint32_t)(x - 1 + map_size_x) % map_size_x, (uint32_t)x % map_size_x,
+							 (uint32_t)(x + 1) % map_size_x};
+			uint32_t Z[3] = {(uint32_t)(z - 1 + map_size_z) % map_size_z, (uint32_t)z % map_size_z,
+							 (uint32_t)(z + 1) % map_size_z};
 
-                                tesselator_addi(tess, (int16_t[]) {x, y, z, x, y + 1, z, x + 1, y + 1, z, x + 1, y, z},
-                                                                (uint32_t[]) {
-                                                                        rgba(r * 0.875F * A, g * 0.875F * A, b * 0.875F * A, 255),
-                                                                        rgba(r * 0.875F * B, g * 0.875F * B, b * 0.875F * B, 255),
-                                                                        rgba(r * 0.875F * C, g * 0.875F * C, b * 0.875F * C, 255),
-                                                                        rgba(r * 0.875F * D, g * 0.875F * D, b * 0.875F * D, 255),
-                                                                },
-                                                                NULL);
-                        } else {
-                                tesselator_set_color(tess, rgba(r * 0.875F, g * 0.875F, b * 0.875F, 255));
-                                tesselator_addi_cube_face(tess, CUBE_FACE_Z_N, x, y, z);
-                        }
-                }
+			// sample the full 3x3x3 air neighborhood exactly once
+			// (replaces up to ~54 redundant lookups, each with modulo, in the old code)
+			int n[3][3][3];
+			for(int dy = 0; dy < 3; dy++) {
+				int yy = y + dy - 1;
+				if(yy < 0) {
+					for(int dx = 0; dx < 3; dx++)
+						for(int dz = 0; dz < 3; dz++)
+							n[dx][dy][dz] = 0;
+				} else if(yy >= map_size_y) {
+					for(int dx = 0; dx < 3; dx++)
+						for(int dz = 0; dz < 3; dz++)
+							n[dx][dy][dz] = 1;
+				} else {
+					int wy = map_size_y - 1 - yy;
+					for(int dx = 0; dx < 3; dx++)
+						for(int dz = 0; dz < 3; dz++)
+							n[dx][dy][dz] = !libvxl_copy_chunk_is_solid(blocks, X[dx], Z[dz], wy);
+				}
+			}
 
-                if(solid_array_isair(blocks, x, y, z + 1)) {
-                        if(ao) {
-                                float A
-                                        = vertexAO(solid_array_isair(blocks, x - 1, y, z + 1), solid_array_isair(blocks, x, y - 1, z + 1),
-                                                           solid_array_isair(blocks, x - 1, y - 1, z + 1), ao_curve);
-                                float B
-                                        = vertexAO(solid_array_isair(blocks, x + 1, y, z + 1), solid_array_isair(blocks, x, y - 1, z + 1),
-                                                           solid_array_isair(blocks, x + 1, y - 1, z + 1), ao_curve);
-                                float C
-                                        = vertexAO(solid_array_isair(blocks, x + 1, y, z + 1), solid_array_isair(blocks, x, y + 1, z + 1),
-                                                           solid_array_isair(blocks, x + 1, y + 1, z + 1), ao_curve);
-                                float D
-                                        = vertexAO(solid_array_isair(blocks, x - 1, y, z + 1), solid_array_isair(blocks, x, y + 1, z + 1),
-                                                           solid_array_isair(blocks, x - 1, y + 1, z + 1), ao_curve);
-                                tesselator_addi(tess, (int16_t[]) {x, y, z + 1, x + 1, y, z + 1, x + 1, y + 1, z + 1, x, y + 1, z + 1},
-                                                                (uint32_t[]) {
-                                                                        rgba(r * 0.625F * A, g * 0.625F * A, b * 0.625F * A, 255),
-                                                                        rgba(r * 0.625F * B, g * 0.625F * B, b * 0.625F * B, 255),
-                                                                        rgba(r * 0.625F * C, g * 0.625F * C, b * 0.625F * C, 255),
-                                                                        rgba(r * 0.625F * D, g * 0.625F * D, b * 0.625F * D, 255),
-                                                                },
-                                                                NULL);
-                        } else {
-                                tesselator_set_color(tess, rgba(r * 0.625F, g * 0.625F, b * 0.625F, 255));
-                                tesselator_addi_cube_face(tess, CUBE_FACE_Z_P, x, y, z);
-                        }
-                }
+			// per-face color LUT: 4 packed colors per face instead of
+			// 3 float multiplies + rgba pack per vertex
+			uint32_t clut[5];
+#define BUILD_CLUT(f)                                                                                                  \
+	do {                                                                                                               \
+		float fr = r * (f), fg = g * (f), fb = b * (f);                                                                \
+		clut[1] = rgba(fr * ao_curve[1], fg * ao_curve[1], fb * ao_curve[1], 255);                                     \
+		clut[2] = rgba(fr * ao_curve[2], fg * ao_curve[2], fb * ao_curve[2], 255);                                     \
+		clut[3] = rgba(fr * ao_curve[3], fg * ao_curve[3], fb * ao_curve[3], 255);                                     \
+		clut[4] = rgba(fr * ao_curve[4], fg * ao_curve[4], fb * ao_curve[4], 255);                                     \
+	} while(0)
 
-                if(solid_array_isair(blocks, x - 1, y, z)) {
-                        if(ao) {
-                                float A
-                                        = vertexAO(solid_array_isair(blocks, x - 1, y - 1, z), solid_array_isair(blocks, x - 1, y, z - 1),
-                                                           solid_array_isair(blocks, x - 1, y - 1, z - 1), ao_curve);
-                                float B
-                                        = vertexAO(solid_array_isair(blocks, x - 1, y - 1, z), solid_array_isair(blocks, x - 1, y, z + 1),
-                                                           solid_array_isair(blocks, x - 1, y - 1, z + 1), ao_curve);
-                                float C
-                                        = vertexAO(solid_array_isair(blocks, x - 1, y + 1, z), solid_array_isair(blocks, x - 1, y, z + 1),
-                                                           solid_array_isair(blocks, x - 1, y + 1, z + 1), ao_curve);
-                                float D
-                                        = vertexAO(solid_array_isair(blocks, x - 1, y + 1, z), solid_array_isair(blocks, x - 1, y, z - 1),
-                                                           solid_array_isair(blocks, x - 1, y + 1, z - 1), ao_curve);
+			if(n[1][1][0]) { // -Z
+				BUILD_CLUT(0.875F);
+				tesselator_addi(tess, (int16_t[]) {x, y, z, x, y + 1, z, x + 1, y + 1, z, x + 1, y, z},
+								(uint32_t[]) {
+									clut[vertexAO_idx(n[0][1][0], n[1][0][0], n[0][0][0])],
+									clut[vertexAO_idx(n[0][1][0], n[1][2][0], n[0][2][0])],
+									clut[vertexAO_idx(n[2][1][0], n[1][2][0], n[2][2][0])],
+									clut[vertexAO_idx(n[2][1][0], n[1][0][0], n[2][0][0])],
+								},
+								NULL);
+			}
 
-                                tesselator_addi(tess, (int16_t[]) {x, y, z, x, y, z + 1, x, y + 1, z + 1, x, y + 1, z},
-                                                                (uint32_t[]) {
-                                                                        rgba(r * 0.75F * A, g * 0.75F * A, b * 0.75F * A, 255),
-                                                                        rgba(r * 0.75F * B, g * 0.75F * B, b * 0.75F * B, 255),
-                                                                        rgba(r * 0.75F * C, g * 0.75F * C, b * 0.75F * C, 255),
-                                                                        rgba(r * 0.75F * D, g * 0.75F * D, b * 0.75F * D, 255),
-                                                                },
-                                                                NULL);
-                        } else {
-                                tesselator_set_color(tess, rgba(r * 0.75F, g * 0.75F, b * 0.75F, 255));
-                                tesselator_addi_cube_face(tess, CUBE_FACE_X_N, x, y, z);
-                        }
-                }
+			if(n[1][1][2]) { // +Z
+				BUILD_CLUT(0.625F);
+				tesselator_addi(tess, (int16_t[]) {x, y, z + 1, x + 1, y, z + 1, x + 1, y + 1, z + 1, x, y + 1, z + 1},
+								(uint32_t[]) {
+									clut[vertexAO_idx(n[0][1][2], n[1][0][2], n[0][0][2])],
+									clut[vertexAO_idx(n[2][1][2], n[1][0][2], n[2][0][2])],
+									clut[vertexAO_idx(n[2][1][2], n[1][2][2], n[2][2][2])],
+									clut[vertexAO_idx(n[0][1][2], n[1][2][2], n[0][2][2])],
+								},
+								NULL);
+			}
 
-                if(solid_array_isair(blocks, x + 1, y, z)) {
-                        if(ao) {
-                                float A
-                                        = vertexAO(solid_array_isair(blocks, x + 1, y - 1, z), solid_array_isair(blocks, x + 1, y, z - 1),
-                                                           solid_array_isair(blocks, x + 1, y - 1, z - 1), ao_curve);
-                                float B
-                                        = vertexAO(solid_array_isair(blocks, x + 1, y + 1, z), solid_array_isair(blocks, x + 1, y, z - 1),
-                                                           solid_array_isair(blocks, x + 1, y + 1, z - 1), ao_curve);
-                                float C
-                                        = vertexAO(solid_array_isair(blocks, x + 1, y + 1, z), solid_array_isair(blocks, x + 1, y, z + 1),
-                                                           solid_array_isair(blocks, x + 1, y + 1, z + 1), ao_curve);
-                                float D
-                                        = vertexAO(solid_array_isair(blocks, x + 1, y - 1, z), solid_array_isair(blocks, x + 1, y, z + 1),
-                                                           solid_array_isair(blocks, x + 1, y - 1, z + 1), ao_curve);
+			if(n[0][1][1]) { // -X
+				BUILD_CLUT(0.75F);
+				tesselator_addi(tess, (int16_t[]) {x, y, z, x, y, z + 1, x, y + 1, z + 1, x, y + 1, z},
+								(uint32_t[]) {
+									clut[vertexAO_idx(n[0][0][1], n[0][1][0], n[0][0][0])],
+									clut[vertexAO_idx(n[0][0][1], n[0][1][2], n[0][0][2])],
+									clut[vertexAO_idx(n[0][2][1], n[0][1][2], n[0][2][2])],
+									clut[vertexAO_idx(n[0][2][1], n[0][1][0], n[0][2][0])],
+								},
+								NULL);
+			}
 
-                                tesselator_addi(tess, (int16_t[]) {x + 1, y, z, x + 1, y + 1, z, x + 1, y + 1, z + 1, x + 1, y, z + 1},
-                                                                (uint32_t[]) {
-                                                                        rgba(r * 0.75F * A, g * 0.75F * A, b * 0.75F * A, 255),
-                                                                        rgba(r * 0.75F * B, g * 0.75F * B, b * 0.75F * B, 255),
-                                                                        rgba(r * 0.75F * C, g * 0.75F * C, b * 0.75F * C, 255),
-                                                                        rgba(r * 0.75F * D, g * 0.75F * D, b * 0.75F * D, 255),
-                                                                },
-                                                                NULL);
-                        } else {
-                                tesselator_set_color(tess, rgba(r * 0.75F, g * 0.75F, b * 0.75F, 255));
-                                tesselator_addi_cube_face(tess, CUBE_FACE_X_P, x, y, z);
-                        }
-                }
+			if(n[2][1][1]) { // +X
+				BUILD_CLUT(0.75F);
+				tesselator_addi(tess, (int16_t[]) {x + 1, y, z, x + 1, y + 1, z, x + 1, y + 1, z + 1, x + 1, y, z + 1},
+								(uint32_t[]) {
+									clut[vertexAO_idx(n[2][0][1], n[2][1][0], n[2][0][0])],
+									clut[vertexAO_idx(n[2][2][1], n[2][1][0], n[2][2][0])],
+									clut[vertexAO_idx(n[2][2][1], n[2][1][2], n[2][2][2])],
+									clut[vertexAO_idx(n[2][0][1], n[2][1][2], n[2][0][2])],
+								},
+								NULL);
+			}
 
-                if(y == map_size_y - 1 || solid_array_isair(blocks, x, y + 1, z)) {
-                        if(ao) {
-                                float A
-                                        = vertexAO(solid_array_isair(blocks, x - 1, y + 1, z), solid_array_isair(blocks, x, y + 1, z - 1),
-                                                           solid_array_isair(blocks, x - 1, y + 1, z - 1), ao_curve);
-                                float B
-                                        = vertexAO(solid_array_isair(blocks, x - 1, y + 1, z), solid_array_isair(blocks, x, y + 1, z + 1),
-                                                           solid_array_isair(blocks, x - 1, y + 1, z + 1), ao_curve);
-                                float C
-                                        = vertexAO(solid_array_isair(blocks, x + 1, y + 1, z), solid_array_isair(blocks, x, y + 1, z + 1),
-                                                           solid_array_isair(blocks, x + 1, y + 1, z + 1), ao_curve);
-                                float D
-                                        = vertexAO(solid_array_isair(blocks, x + 1, y + 1, z), solid_array_isair(blocks, x, y + 1, z - 1),
-                                                           solid_array_isair(blocks, x + 1, y + 1, z - 1), ao_curve);
+			if(n[1][2][1]) { // +Y (n handles y == map_size_y - 1 as air)
+				BUILD_CLUT(1.0F);
+				tesselator_addi(tess, (int16_t[]) {x, y + 1, z, x, y + 1, z + 1, x + 1, y + 1, z + 1, x + 1, y + 1, z},
+								(uint32_t[]) {
+									clut[vertexAO_idx(n[0][2][1], n[1][2][0], n[0][2][0])],
+									clut[vertexAO_idx(n[0][2][1], n[1][2][2], n[0][2][2])],
+									clut[vertexAO_idx(n[2][2][1], n[1][2][2], n[2][2][2])],
+									clut[vertexAO_idx(n[2][2][1], n[1][2][0], n[2][2][0])],
+								},
+								NULL);
+			}
 
-                                tesselator_addi(tess, (int16_t[]) {x, y + 1, z, x, y + 1, z + 1, x + 1, y + 1, z + 1, x + 1, y + 1, z},
-                                                                (uint32_t[]) {
-                                                                        rgba(r * A, g * A, b * A, 255),
-                                                                        rgba(r * B, g * B, b * B, 255),
-                                                                        rgba(r * C, g * C, b * C, 255),
-                                                                        rgba(r * D, g * D, b * D, 255),
-                                                                },
-                                                                NULL);
-                        } else {
-                                tesselator_set_color(tess, rgba(r, g, b, 255));
-                                tesselator_addi_cube_face(tess, CUBE_FACE_Y_P, x, y, z);
-                        }
-                }
+			if(y > 0 && n[1][0][1]) { // -Y
+				BUILD_CLUT(0.5F);
+				tesselator_addi(tess, (int16_t[]) {x, y, z, x + 1, y, z, x + 1, y, z + 1, x, y, z + 1},
+								(uint32_t[]) {
+									clut[vertexAO_idx(n[0][0][1], n[1][0][0], n[0][0][0])],
+									clut[vertexAO_idx(n[2][0][1], n[1][0][0], n[2][0][0])],
+									clut[vertexAO_idx(n[2][0][1], n[1][0][2], n[2][0][2])],
+									clut[vertexAO_idx(n[0][0][1], n[1][0][2], n[0][0][2])],
+								},
+								NULL);
+			}
+#undef BUILD_CLUT
+		} else {
+			if(solid_array_isair(blocks, x, y, z - 1)) {
+				tesselator_set_color(tess, rgba(r * 0.875F, g * 0.875F, b * 0.875F, 255));
+				tesselator_addi_cube_face(tess, CUBE_FACE_Z_N, x, y, z);
+			}
 
-                if(y > 0 && solid_array_isair(blocks, x, y - 1, z)) {
-                        if(ao) {
-                                float A
-                                        = vertexAO(solid_array_isair(blocks, x - 1, y - 1, z), solid_array_isair(blocks, x, y - 1, z - 1),
-                                                           solid_array_isair(blocks, x - 1, y - 1, z - 1), ao_curve);
-                                float B
-                                        = vertexAO(solid_array_isair(blocks, x + 1, y - 1, z), solid_array_isair(blocks, x, y - 1, z - 1),
-                                                           solid_array_isair(blocks, x + 1, y - 1, z - 1), ao_curve);
-                                float C
-                                        = vertexAO(solid_array_isair(blocks, x + 1, y - 1, z), solid_array_isair(blocks, x, y - 1, z + 1),
-                                                           solid_array_isair(blocks, x + 1, y - 1, z + 1), ao_curve);
-                                float D
-                                        = vertexAO(solid_array_isair(blocks, x - 1, y - 1, z), solid_array_isair(blocks, x, y - 1, z + 1),
-                                                           solid_array_isair(blocks, x - 1, y - 1, z + 1), ao_curve);
+			if(solid_array_isair(blocks, x, y, z + 1)) {
+				tesselator_set_color(tess, rgba(r * 0.625F, g * 0.625F, b * 0.625F, 255));
+				tesselator_addi_cube_face(tess, CUBE_FACE_Z_P, x, y, z);
+			}
 
-                                tesselator_addi(tess, (int16_t[]) {x, y, z, x + 1, y, z, x + 1, y, z + 1, x, y, z + 1},
-                                                                (uint32_t[]) {
-                                                                        rgba(r * 0.5F * A, g * 0.5F * A, b * 0.5F * A, 255),
-                                                                        rgba(r * 0.5F * B, g * 0.5F * B, b * 0.5F * B, 255),
-                                                                        rgba(r * 0.5F * C, g * 0.5F * C, b * 0.5F * C, 255),
-                                                                        rgba(r * 0.5F * D, g * 0.5F * D, b * 0.5F * D, 255),
-                                                                },
-                                                                NULL);
-                        } else {
-                                tesselator_set_color(tess, rgba(r * 0.5F, g * 0.5F, b * 0.5F, 255));
-                                tesselator_addi_cube_face(tess, CUBE_FACE_Y_N, x, y, z);
-                        }
-                }
-        }
+			if(solid_array_isair(blocks, x - 1, y, z)) {
+				tesselator_set_color(tess, rgba(r * 0.75F, g * 0.75F, b * 0.75F, 255));
+				tesselator_addi_cube_face(tess, CUBE_FACE_X_N, x, y, z);
+			}
 
-        (*max_height)++;
+			if(solid_array_isair(blocks, x + 1, y, z)) {
+				tesselator_set_color(tess, rgba(r * 0.75F, g * 0.75F, b * 0.75F, 255));
+				tesselator_addi_cube_face(tess, CUBE_FACE_X_P, x, y, z);
+			}
+
+			if(y == map_size_y - 1 || solid_array_isair(blocks, x, y + 1, z)) {
+				tesselator_set_color(tess, rgba(r, g, b, 255));
+				tesselator_addi_cube_face(tess, CUBE_FACE_Y_P, x, y, z);
+			}
+
+			if(y > 0 && solid_array_isair(blocks, x, y - 1, z)) {
+				tesselator_set_color(tess, rgba(r * 0.5F, g * 0.5F, b * 0.5F, 255));
+				tesselator_addi_cube_face(tess, CUBE_FACE_Y_N, x, y, z);
+			}
+		}
+	}
 }
 
 static void emit_textured_face(struct tesselator* tess, enum tesselator_cube_face face,
