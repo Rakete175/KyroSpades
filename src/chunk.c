@@ -60,6 +60,7 @@ struct channel chunk_result_queue;
 CHUNK_LOCK_T chunk_block_queue_lock;
 
 int chunk_gen = 0;
+static int chunk_bulk_pending = 0;
 
 struct chunk_work_packet {
         size_t chunk_x;
@@ -99,7 +100,7 @@ void chunk_init() {
 
         chunk_lock_init(&chunk_block_queue_lock);
 
-        int chunk_enabled_cores = min(max(window_cpucores() / 2, 1), CHUNK_WORKERS_MAX);
+        int chunk_enabled_cores = min(max(window_cpucores() - 1, 1), CHUNK_WORKERS_MAX);
         log_info("%i cores enabled for chunk generation", chunk_enabled_cores);
 
         pthread_t threads[chunk_enabled_cores];
@@ -898,64 +899,45 @@ void chunk_generate_textured(struct libvxl_chunk_copy* blocks, struct tesselator
 }
 
 void chunk_update_all() {
-        size_t drain = channel_size(&chunk_result_queue);
+        float start = window_time();
+        float budget = (chunk_bulk_pending > 0) ? 0.050F : 0.006F;
 
-        /* Cap the number of chunk results processed per frame. When many
-           blocks are destroyed at once (grenade, block line, mass dig),
-           the worker threads can produce dozens of chunk rebuilds faster
-           than the main thread can upload them to GL. Processing all of
-           them in one frame causes:
-             - a VLA of struct chunk_result_packet on the stack (96 bytes
-               each, up to ~96 KB if all 1024 chunks rebuild at once)
-             - a burst of tesselator_glx() + glTexSubImage2D() GL calls
-               that stall the GPU pipeline and drop the frame to single
-               digits
-           Spreading the uploads across frames keeps the worst-case frame
-           time bounded. The queue retains the deferred results; we just
-           process fewer this frame. 4 is a safe empirical cap that keeps
-           visual latency low (<70 ms at 60 fps) while smoothing the spike. */
-        const size_t MAX_CHUNK_UPDATES_PER_FRAME = 4;
-        if(drain > MAX_CHUNK_UPDATES_PER_FRAME)
-                drain = MAX_CHUNK_UPDATES_PER_FRAME;
+        struct chunk_result_packet result;
 
-        if(drain > 0) {
-                struct chunk_result_packet results[drain];
+        while(channel_size(&chunk_result_queue) > 0) {
+                channel_await(&chunk_result_queue, &result);
 
-                for(size_t k = 0; k < drain; k++) {
-                        channel_await(&chunk_result_queue, results + k);
-                        results[k].chunk->updated = false;
-                }
+                if(chunk_bulk_pending > 0)
+                        chunk_bulk_pending--;
 
-                struct chunk_result_packet* result = results + drain - 1;
-
-                for(size_t k = 0; k < drain; k++, result--) {
-                        if(!result->chunk->updated && result->gen == result->chunk->gen) {
-                                result->chunk->updated = true;
-
-                                if(!result->chunk->created) {
-                                        glx_displaylist_create(&result->chunk->display_list, true, false);
-                                        result->chunk->created = true;
-                                }
-
-                                result->chunk->max_height = result->max_height;
-
-                                tesselator_glx(&result->tesselator, &result->chunk->display_list);
-
-                                glBindTexture(GL_TEXTURE_2D, texture_minimap.texture_id);
-                                glTexSubImage2D(GL_TEXTURE_2D, 0, result->chunk->x * CHUNK_SIZE, result->chunk->y * CHUNK_SIZE,
-                                                                CHUNK_SIZE, CHUNK_SIZE, GL_RGBA, GL_UNSIGNED_BYTE, result->minimap_data);
-                                glBindTexture(GL_TEXTURE_2D, 0);
+                if(result.gen == result.chunk->gen) {
+                        if(!result.chunk->created) {
+                                glx_displaylist_create(&result.chunk->display_list, true, false);
+                                result.chunk->created = true;
                         }
 
-                        tesselator_free(&result->tesselator);
-                        free(result->minimap_data);
+                        result.chunk->max_height = result.max_height;
+
+                        tesselator_glx(&result.tesselator, &result.chunk->display_list);
+
+                        glBindTexture(GL_TEXTURE_2D, texture_minimap.texture_id);
+                        glTexSubImage2D(GL_TEXTURE_2D, 0, result.chunk->x * CHUNK_SIZE, result.chunk->y * CHUNK_SIZE,
+                                                        CHUNK_SIZE, CHUNK_SIZE, GL_RGBA, GL_UNSIGNED_BYTE, result.minimap_data);
+                        glBindTexture(GL_TEXTURE_2D, 0);
                 }
+
+                tesselator_free(&result.tesselator);
+                free(result.minimap_data);
+
+                if(window_time() - start > budget)
+                        break;
         }
 }
 
 void chunk_rebuild_all() {
         channel_clear(&chunk_work_queue);
         chunk_gen++;
+        chunk_bulk_pending = CHUNKS_PER_DIM * CHUNKS_PER_DIM;
 
         for(int k = 0; k < CHUNKS_PER_DIM; k++)
                 for(int i = 0; i < CHUNKS_PER_DIM; i++)
