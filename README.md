@@ -2,7 +2,7 @@
 ### This project is a modified fork of [ButterSpades](https://github.com/utf-4096/butterspades), introducing several quality-of-life improvements and visual enhancements. Link: https://github.com/Kyrope01/KyroSpades
 ### Compiled [releases](https://github.com/Kyrope01/KyroSpades/releases/tag/release) available for: Android, Windows, MacOS, Linux.
 ### KyroSpades Discord server: https://discord.gg/FM7vSxtug4
-#### Date of latest update: 22nd June, 2026
+#### Date of latest update: 6th July, 2026
 
 ## New Features
 | Feature | Description |
@@ -36,6 +36,7 @@
 | **Improved Settings Menu** | Settings menu UI has been improved a lot. |
 | **Server Pinning Added** | Right clicking on a server in the server list highlights it and pins it to the top of the server list. |
 | **Textured Blocks Added** | Blocks can now have textures when textured blocks are enabled. |
+| **Water shader added** | Water blocks are reflecting blocks while fitting to a voxel game. |
 
 
 ## Quick Setup: Dynamic Wallpapers
