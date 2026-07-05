@@ -530,6 +530,22 @@ unsigned int map_get(int x, int y, int z) {
 	return rgb2bgr(result);
 }
 
+void map_read_lock(void) {
+	pthread_rwlock_rdlock(&map_lock);
+}
+
+void map_read_unlock(void) {
+	pthread_rwlock_unlock(&map_lock);
+}
+
+bool map_isair_nolock(int x, int y, int z) {
+	return !libvxl_map_issolid(&map, x, z, map_size_y - 1 - y);
+}
+
+unsigned int map_get_nolock(int x, int y, int z) {
+	return rgb2bgr(libvxl_map_get(&map, x, z, map_size_y - 1 - y));
+}
+
 void map_set(int x, int y, int z, unsigned int color) {
 	if(x < 0 || y < 0 || z < 0 || x >= map_size_x || y >= map_size_y || z >= map_size_z)
 		return;

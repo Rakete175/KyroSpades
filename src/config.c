@@ -295,6 +295,7 @@ void config_save() {
         config_seti("client", "force_displaylist", settings.force_displaylist);
         config_seti("client", "inverty", settings.invert_y);
         config_seti("client", "smooth_fog", settings.smooth_fog);
+        config_seti("client", "water_shader", settings.water_shader);
         config_seti("client", "ambient_occlusion", settings.ambient_occlusion);
         config_setf("client", "camera_fov", settings.camera_fov);
         config_seti("client", "hold_down_sights", settings.hold_down_sights);
@@ -412,6 +413,7 @@ static int config_read_key(void* user, const char* section, const char* name, co
                 IMPORT_SETTING(settings.force_displaylist, force_displaylist, atoi(value));
                 IMPORT_SETTING(settings.invert_y, inverty, atoi(value));
                 IMPORT_SETTING(settings.smooth_fog, smooth_fog, atoi(value));
+                IMPORT_SETTING(settings.water_shader, water_shader, atoi(value));
                 IMPORT_SETTING(settings.ambient_occlusion, ambient_occlusion, atoi(value));
                 IMPORT_SETTING(settings.camera_fov, camera_fov, fmax(fmin(atof(value), CAMERA_MAX_FOV), CAMERA_DEFAULT_FOV));
                 IMPORT_SETTING(settings.hold_down_sights, hold_down_sights, atoi(value));
@@ -968,6 +970,16 @@ void config_reload() {
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
+                                 .value = &settings_tmp.water_shader,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Reflective water surface",
+                                 .name = "Water shader",
+                                 .category = "Graphic Settings",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
                                  .value = &settings_tmp.ambient_occlusion,
                                  .type = CONFIG_TYPE_INT,
                                  .min = 0,
@@ -1482,4 +1494,3 @@ void config_reload() {
 		         });
 
 }
-

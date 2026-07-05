@@ -61,6 +61,7 @@ extern struct RENDER_OPTIONS {
 	int force_displaylist;
 	int invert_y;
 	int smooth_fog;
+	int water_shader;
 	float camera_fov;
 	int hold_down_sights;
 	float chat_shadow;

@@ -52,6 +52,7 @@
 #include "log.h"
 #include "ping.h"
 #include "matrix.h"
+#include "water.h"
 #include "texture.h"
 #include "chunk.h"
 #include "skins.h"
@@ -232,6 +233,8 @@ void drawScene() {
                         glDisable(GL_FOG);
 #endif
         }
+
+        water_render();
 
         if(settings.smooth_fog) {
 #ifdef OPENGL_ES
@@ -479,6 +482,7 @@ void display() {
                 camera_ExtractFrustum();
 
                 if(!network_map_transfer) {
+                        water_reflection_pass();
                         glx_enable_sphericalfog();
                         drawScene();
                         settings.render_distance = saved_render_distance;
@@ -1213,6 +1217,7 @@ int main(int argc, char** argv) {
         settings.force_displaylist = 0;
         settings.invert_y = 0;
         settings.smooth_fog = 0;
+        settings.water_shader = 0;
         settings.camera_fov = CAMERA_DEFAULT_FOV;
         settings.rifle_ads_fov = CAMERA_DEFAULT_FOV;
         settings.shotgun_ads_fov = CAMERA_DEFAULT_FOV;
