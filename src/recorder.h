@@ -18,6 +18,8 @@ int recorder_is_buffer_active(void);
 int recorder_save_replay(void);
 void recorder_trigger_replay_flash(void);
 int recorder_is_flashing(void);
+void recorder_trigger_error_flash(void);
+int recorder_is_error_flashing(void);
 
 /* Frame capture — writes pixels to active pipes */
 void recorder_capture_frame(void);

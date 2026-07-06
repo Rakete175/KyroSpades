@@ -151,6 +151,8 @@ if(WIN32)
 	list(APPEND CLIENT_SOURCES ${KyroSpades_SOURCE_DIR}/resources/icon.rc)
 endif()
 
+set_source_files_properties(water.c PROPERTIES COMPILE_FLAGS -fno-fast-math)
+
 # ── Target: shared library on Android, executable everywhere else ─────────────
 # SDLActivity.java calls System.loadLibrary("main") which expects libmain.so.
 # On all other platforms we keep the original executable target named "client".
@@ -252,9 +254,13 @@ find_package(Threads REQUIRED)
 
 # ── FFmpeg (prefer vendored Linux libs, fall back to system) ─────────────────
 set(FFMPEG_DIR ${KyroSpades_SOURCE_DIR}/deps/ffmpeg)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND EXISTS "${FFMPEG_DIR}/lib/libavcodec.a")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND (EXISTS "${FFMPEG_DIR}/lib/libavcodec.a" OR EXISTS "${FFMPEG_DIR}/lib/libavcodec.so"))
 	message(STATUS "FFmpeg: using vendored libs from deps/ffmpeg/")
-	target_include_directories(${KS_TARGET} PRIVATE ${FFMPEG_DIR}/include)
+	if(EXISTS "${FFMPEG_DIR}/include/x86_64-linux-gnu/libavcodec")
+		target_include_directories(${KS_TARGET} PRIVATE ${FFMPEG_DIR}/include/x86_64-linux-gnu)
+	else()
+		target_include_directories(${KS_TARGET} PRIVATE ${FFMPEG_DIR}/include)
+	endif()
 	target_link_directories(${KS_TARGET} PRIVATE ${FFMPEG_DIR}/lib)
 	target_link_libraries(${KS_TARGET}
 	        avcodec avformat avutil swresample swscale)
@@ -272,6 +278,9 @@ else()
 		target_include_directories(${KS_TARGET} PRIVATE
 			${AVCODEC_INCLUDE_DIRS} ${AVFORMAT_INCLUDE_DIRS}
 			${AVUTIL_INCLUDE_DIRS} ${SWRESAMPLE_INCLUDE_DIRS} ${SWSCALE_INCLUDE_DIRS})
+		target_link_directories(${KS_TARGET} PRIVATE
+			${AVCODEC_LIBRARY_DIRS} ${AVFORMAT_LIBRARY_DIRS}
+			${AVUTIL_LIBRARY_DIRS} ${SWRESAMPLE_LIBRARY_DIRS} ${SWSCALE_LIBRARY_DIRS})
 		target_link_libraries(${KS_TARGET}
 			${AVCODEC_LIBRARIES} ${AVFORMAT_LIBRARIES}
 			${AVUTIL_LIBRARIES} ${SWRESAMPLE_LIBRARIES} ${SWSCALE_LIBRARIES})

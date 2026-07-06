@@ -14,6 +14,7 @@
 #endif
 
 #include "demo.h"
+#include "file.h"
 #include "window.h"
 #include "network.h"
 #include "map.h"
@@ -24,6 +25,26 @@
 
 
 /* ── File listing ─────────────────────────────────────────────────── */
+
+struct demo_list_ctx {
+	char*** out;
+	int* count;
+	int* cap;
+};
+
+static void demo_list_cb(const char* name, void* user) {
+	struct demo_list_ctx* ctx = user;
+	size_t n = strlen(name);
+	if (n < 5 || strcmp(name + n - 5, ".demo") != 0)
+		return;
+	if (*ctx->count == *ctx->cap) {
+		*ctx->cap = *ctx->cap ? *ctx->cap * 2 : 16;
+		*ctx->out = realloc(*ctx->out, *ctx->cap * sizeof(char*));
+	}
+	char path[512];
+	snprintf(path, sizeof(path), "demos/%s", name);
+	(*ctx->out)[(*ctx->count)++] = strdup(path);
+}
 
 int demo_list_files(char*** out) {
 	const char* dir = "demos";
@@ -48,21 +69,11 @@ int demo_list_files(char*** out) {
 	} while (FindNextFileA(h, &fd));
 	FindClose(h);
 #else
-	DIR* d = opendir(dir);
-	if (!d) return 0;
-	struct dirent* e;
-	while ((e = readdir(d))) {
-		size_t n = strlen(e->d_name);
-		if (n < 5 || strcmp(e->d_name + n - 5, ".demo") != 0) continue;
-		if (count == cap) {
-			cap = cap ? cap * 2 : 16;
-			*out = realloc(*out, cap * sizeof(char*));
-		}
-		char path[512];
-		snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
-		(*out)[count++] = strdup(path);
+	{
+		struct demo_list_ctx ctx = { out, &count, &cap };
+		int ret = file_dir_list(dir, demo_list_cb, &ctx);
+		if (ret < 0) return 0;
 	}
-	closedir(d);
 #endif
 
 	if (count > 1) {

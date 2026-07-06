@@ -27,6 +27,8 @@ int  recorder_is_buffer_active(void) { return 0; }
 int  recorder_save_replay(void) { return 0; }
 void recorder_trigger_replay_flash(void) {}
 int  recorder_is_flashing(void) { return 0; }
+void recorder_trigger_error_flash(void) {}
+int  recorder_is_error_flashing(void) { return 0; }
 void recorder_capture_frame(void) {}
 void recorder_set_fps(int fps) { (void)fps; }
 int  recorder_get_fps(void) { return 60; }
@@ -63,11 +65,32 @@ void audio_detect_monitor(char* buf, int len) { (void)buf; (void)len; }
 #include "file.h"
 #include "window.h"
 
-/* Normal recording (F7) state */
+/* ── Raw frame type (shared by both pipelines) ─────────────────────── */
+#define MAX_RAW_FRAMES 8
+typedef struct {
+    unsigned char* data;
+    int size;
+    int64_t capture_time_us;
+} RawFrame;
+
+/* ── Recording (F7) state — fully independent pipeline ─────────────── */
 static int rec_running = 0;
 static int rec_frames = 0;
 static int64_t rec_start_time = 0;
 static int rec_buf_w = 0, rec_buf_h = 0;
+
+/* Recording-specific encoder pipeline */
+static AVCodecContext* rec_venc_ctx = NULL;
+static AVFrame* rec_vframe = NULL;
+static struct SwsContext* rec_vsws = NULL;
+
+/* Recording-specific raw frame queue */
+static RawFrame rec_raw_frames[MAX_RAW_FRAMES];
+static int rec_raw_head = 0, rec_raw_tail = 0, rec_raw_count = 0;
+static pthread_mutex_t rec_raw_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t rec_raw_cond = PTHREAD_COND_INITIALIZER;
+static pthread_t rec_encode_thread;
+static volatile int rec_encode_thread_running = 0;
 
 /* Growing video packet buffer for recording */
 static AVPacket** rec_vbuf = NULL;
@@ -81,14 +104,23 @@ static int rec_pcm_frames = 0;
 static int rec_pcm_capacity = 0;
 static pthread_mutex_t rec_pcm_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/* Replay buffer (UI toggle) — in-memory circular buffer */
+/* ── Replay buffer state — fully independent pipeline ───────────────── */
 static int buf_running = 0;
 
-/* Video encoder state */
+/* Buffer-specific encoder pipeline */
 static AVCodecContext* venc_ctx = NULL;
 static AVFrame* vframe = NULL;
 static struct SwsContext* vsws = NULL;
-/* Circular buffers for encoded packets */
+
+/* Buffer-specific raw frame queue */
+static RawFrame raw_frames[MAX_RAW_FRAMES];
+static int raw_head = 0, raw_tail = 0, raw_count = 0;
+static pthread_mutex_t raw_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t raw_cond = PTHREAD_COND_INITIALIZER;
+static pthread_t encode_thread;
+static volatile int encode_thread_running = 0;
+
+/* Circular video packet buffer for replay */
 #define MAX_PACKETS 65536
 static AVPacket** vbuf = NULL;
 static int vbuf_write_idx = 0;
@@ -101,39 +133,31 @@ static int pcm_write_byte = 0;
 static int pcm_bytes = 0;
 static int pcm_max_bytes = 0;
 
-/* Audio capture thread */
+/* Buffer-specific dimensions (set at start, never change) */
+static int buf_w = 0, buf_h = 0;
+static int64_t buffer_start_time = 0;
+
+/* ── Shared state ──────────────────────────────────────────────────── */
 static pthread_t audio_thread;
 static volatile int audio_thread_running = 0;
-
-/* Mutexes for circular buffer access */
 static pthread_mutex_t vbuf_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t pcm_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/* Raw frame queue (offloads encoding from main thread) */
-#define MAX_RAW_FRAMES 8
-typedef struct {
-    unsigned char* data;
-    int size;
-    int64_t capture_time_us;
-} RawFrame;
-static RawFrame raw_frames[MAX_RAW_FRAMES];
-static int raw_head = 0, raw_tail = 0, raw_count = 0;
-static pthread_mutex_t raw_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t raw_cond = PTHREAD_COND_INITIALIZER;
-static pthread_t encode_thread;
-static volatile int encode_thread_running = 0;
-
-/* Shared state */
 static double last_capture_time = 0;
 static int target_fps = 60;
 static int target_bitrate_kbps = 10000;
 static char current_filename[512];
 static int w = 0, h = 0;
 static double replay_flash_start_time = 0;
+static double replay_error_flash_start_time = 0;
 
-/* Buffer-specific dimensions (set at start, never change) */
-static int buf_w = 0, buf_h = 0;
-static int64_t buffer_start_time = 0;
+/* ── Forward declarations ──────────────────────────────────────────── */
+static void recorder_stop_recording(void);
+static void* rec_encode_worker_thread(void* arg);
+static void* encode_worker_thread(void* arg);
+static void* audio_capture_thread(void* arg);
+
+/* ── Helpers ───────────────────────────────────────────────────────── */
 
 void audio_detect_monitor(char* buf, int len) {
     buf[0] = '\0';
@@ -163,6 +187,19 @@ int recorder_is_flashing(void) {
     return 1;
 }
 
+void recorder_trigger_error_flash(void) {
+    replay_error_flash_start_time = window_time();
+}
+
+int recorder_is_error_flashing(void) {
+    if(replay_error_flash_start_time == 0) return 0;
+    if(window_time() - replay_error_flash_start_time > 0.5) {
+        replay_error_flash_start_time = 0;
+        return 0;
+    }
+    return 1;
+}
+
 void recorder_set_fps(int fps)       { target_fps = fps; }
 int  recorder_get_fps(void)          { return target_fps; }
 void recorder_set_bitrate(int kbps)  { target_bitrate_kbps = kbps; }
@@ -181,10 +218,7 @@ void recorder_init(void) {
     log_info("Recorder: initialized");
 }
 
-static void recorder_stop_recording(void);
-static void* encode_worker_thread(void* arg);
-
-/* ── Circular buffer helpers ─────────────────────────────────────────── */
+/* ── Circular buffer helpers (replay buffer only) ──────────────────── */
 static int oldest_idx(int write_idx, int count) {
     return (write_idx - count + MAX_PACKETS) % MAX_PACKETS;
 }
@@ -218,62 +252,62 @@ static void vbuf_trim(double max_dur) {
     pthread_mutex_unlock(&vbuf_mutex);
 }
 
-/* ── Normal recording (F7) — single file ─────────────────────────────── */
-
-static void* audio_capture_thread(void* arg);
+/* ══════════════════════════════════════════════════════════════════════
+   RECORDING (F7) — fully independent pipeline
+   ══════════════════════════════════════════════════════════════════════ */
 
 static int ensure_rec_encoder(int width, int height) {
-    if(venc_ctx && venc_ctx->width == width && venc_ctx->height == height
-       && vframe && vsws)
+    if(rec_venc_ctx && rec_venc_ctx->width == width && rec_venc_ctx->height == height
+       && rec_vframe && rec_vsws)
         return 1;
 
-    if(vsws) { sws_freeContext(vsws); vsws = NULL; }
-    if(vframe) { av_frame_free(&vframe); vframe = NULL; }
-    if(venc_ctx) { avcodec_free_context(&venc_ctx); venc_ctx = NULL; }
+    if(rec_vsws) { sws_freeContext(rec_vsws); rec_vsws = NULL; }
+    if(rec_vframe) { av_frame_free(&rec_vframe); rec_vframe = NULL; }
+    if(rec_venc_ctx) { avcodec_free_context(&rec_venc_ctx); rec_venc_ctx = NULL; }
 
     const AVCodec* venc = avcodec_find_encoder_by_name("libx264");
-    if(!venc) { log_error("libx264 encoder not found"); return 0; }
+    if(!venc) { log_error("Recorder: libx264 encoder not found for recording"); return 0; }
 
-    venc_ctx = avcodec_alloc_context3(venc);
-    if(!venc_ctx) return 0;
+    rec_venc_ctx = avcodec_alloc_context3(venc);
+    if(!rec_venc_ctx) return 0;
 
-    venc_ctx->width = width;
-    venc_ctx->height = height;
-    venc_ctx->time_base = (AVRational){ 1, target_fps };
-    venc_ctx->framerate = (AVRational){ target_fps, 1 };
-    venc_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
-    venc_ctx->bit_rate = target_bitrate_kbps * 1000;
-    venc_ctx->rc_max_rate = target_bitrate_kbps * 1000;
-    venc_ctx->rc_buffer_size = target_bitrate_kbps * 1000 * 2;
-    venc_ctx->gop_size = target_fps;
-    venc_ctx->max_b_frames = 0;
-    venc_ctx->profile = FF_PROFILE_H264_HIGH;
-    venc_ctx->level = 41;
-    av_opt_set(venc_ctx->priv_data, "preset", "veryfast", 0);
-    av_opt_set(venc_ctx->priv_data, "tune", "zerolatency", 0);
+    rec_venc_ctx->width = width;
+    rec_venc_ctx->height = height;
+    rec_venc_ctx->time_base = (AVRational){ 1, target_fps };
+    rec_venc_ctx->framerate = (AVRational){ target_fps, 1 };
+    rec_venc_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
+    rec_venc_ctx->bit_rate = target_bitrate_kbps * 1000;
+    rec_venc_ctx->rc_max_rate = target_bitrate_kbps * 1000;
+    rec_venc_ctx->rc_buffer_size = target_bitrate_kbps * 1000 * 2;
+    rec_venc_ctx->gop_size = target_fps;
+    rec_venc_ctx->max_b_frames = 0;
+    rec_venc_ctx->profile = FF_PROFILE_H264_HIGH;
+    rec_venc_ctx->level = 41;
+    av_opt_set(rec_venc_ctx->priv_data, "preset", "veryfast", 0);
+    av_opt_set(rec_venc_ctx->priv_data, "tune", "zerolatency", 0);
 
-    if(avcodec_open2(venc_ctx, venc, NULL) < 0) {
-        avcodec_free_context(&venc_ctx); venc_ctx = NULL; return 0;
+    if(avcodec_open2(rec_venc_ctx, venc, NULL) < 0) {
+        avcodec_free_context(&rec_venc_ctx); rec_venc_ctx = NULL; return 0;
     }
 
-    vframe = av_frame_alloc();
-    if(!vframe) { avcodec_free_context(&venc_ctx); venc_ctx = NULL; return 0; }
-    vframe->format = AV_PIX_FMT_YUV420P;
-    vframe->width = width;
-    vframe->height = height;
-    if(av_frame_get_buffer(vframe, 0) < 0) {
-        av_frame_free(&vframe);
-        avcodec_free_context(&venc_ctx); venc_ctx = NULL;
+    rec_vframe = av_frame_alloc();
+    if(!rec_vframe) { avcodec_free_context(&rec_venc_ctx); rec_venc_ctx = NULL; return 0; }
+    rec_vframe->format = AV_PIX_FMT_YUV420P;
+    rec_vframe->width = width;
+    rec_vframe->height = height;
+    if(av_frame_get_buffer(rec_vframe, 0) < 0) {
+        av_frame_free(&rec_vframe);
+        avcodec_free_context(&rec_venc_ctx); rec_venc_ctx = NULL;
         return 0;
     }
 
-    vsws = sws_getContext(width, height, AV_PIX_FMT_RGBA,
-                          width, height, AV_PIX_FMT_YUV420P,
-                          SWS_BILINEAR, NULL, NULL, NULL);
-    if(!vsws) {
-        av_frame_free(&vframe); vframe = NULL;
-        avcodec_free_context(&venc_ctx); venc_ctx = NULL;
-        return 1;
+    rec_vsws = sws_getContext(width, height, AV_PIX_FMT_RGBA,
+                              width, height, AV_PIX_FMT_YUV420P,
+                              SWS_BILINEAR, NULL, NULL, NULL);
+    if(!rec_vsws) {
+        av_frame_free(&rec_vframe); rec_vframe = NULL;
+        avcodec_free_context(&rec_venc_ctx); rec_venc_ctx = NULL;
+        return 0;
     }
 
     return 1;
@@ -331,27 +365,26 @@ static void recorder_start_recording(void) {
     rec_frames = 0;
     last_capture_time = 0;
 
-    /* Start encode worker thread if not already running */
-    if(!encode_thread_running) {
-        raw_head = raw_tail = raw_count = 0;
-        encode_thread_running = 1;
-        if(pthread_create(&encode_thread, NULL, encode_worker_thread, NULL) != 0) {
-            log_error("Failed to start encode worker thread for recording");
-            encode_thread_running = 0;
-        }
+    /* Start recording's own encode thread */
+    rec_raw_head = rec_raw_tail = rec_raw_count = 0;
+    rec_encode_thread_running = 1;
+    if(pthread_create(&rec_encode_thread, NULL, rec_encode_worker_thread, NULL) != 0) {
+        log_error("Recorder: failed to start recording encode thread");
+        rec_encode_thread_running = 0;
+        rec_running = 0;
+        return;
     }
 
     /* Start audio capture thread if not already running */
     if(!audio_thread_running) {
         audio_thread_running = 1;
         if(pthread_create(&audio_thread, NULL, audio_capture_thread, NULL) != 0) {
-            log_warn("Failed to start audio capture thread for recording");
+            log_warn("Recorder: failed to start audio capture thread for recording");
             audio_thread_running = 0;
         }
     }
 
-    log_info("Recorder: started recording to %s (rec_running=%d, encode_thread=%d, audio_thread=%d)",
-             current_filename, rec_running, encode_thread_running, audio_thread_running);
+    log_info("Recorder: started recording to %s", current_filename);
 }
 
 static void recorder_stop_recording(void) {
@@ -361,25 +394,27 @@ static void recorder_stop_recording(void) {
     log_info("Recorder: stopping recording, %d frames captured", rec_frames);
     rec_running = 0;
 
-    /* Stop encode thread if buffer isn't running */
-    if(encode_thread_running && !buf_running) {
-        pthread_mutex_lock(&raw_mutex);
-        encode_thread_running = 0;
-        pthread_cond_broadcast(&raw_cond);
-        pthread_mutex_unlock(&raw_mutex);
-        pthread_join(encode_thread, NULL);
+    /* Always stop recording's own encode thread */
+    if(rec_encode_thread_running) {
+        pthread_mutex_lock(&rec_raw_mutex);
+        rec_encode_thread_running = 0;
+        pthread_cond_broadcast(&rec_raw_cond);
+        pthread_mutex_unlock(&rec_raw_mutex);
+        pthread_join(rec_encode_thread, NULL);
     }
 
-    /* Drain video encoder */
-    if(venc_ctx) {
-        avcodec_send_frame(venc_ctx, NULL);
+    /* Always drain recording's own encoder */
+    if(rec_venc_ctx) {
+        avcodec_send_frame(rec_venc_ctx, NULL);
         AVPacket* pkt = av_packet_alloc();
-        while(avcodec_receive_packet(venc_ctx, pkt) == 0) {
+        while(avcodec_receive_packet(rec_venc_ctx, pkt) == 0) {
             pkt->duration = 1;
             pthread_mutex_lock(&rec_vmutex);
             if(rec_vcount >= rec_vcapacity) {
                 rec_vcapacity = rec_vcapacity ? rec_vcapacity * 2 : 4096;
-                rec_vbuf = realloc(rec_vbuf, rec_vcapacity * sizeof(AVPacket*));
+                AVPacket** new_buf = realloc(rec_vbuf, rec_vcapacity * sizeof(AVPacket*));
+                if(!new_buf) { rec_vcapacity = rec_vcount; av_packet_free(&pkt); pthread_mutex_unlock(&rec_vmutex); break; }
+                rec_vbuf = new_buf;
             }
             rec_vbuf[rec_vcount++] = pkt;
             pthread_mutex_unlock(&rec_vmutex);
@@ -388,7 +423,7 @@ static void recorder_stop_recording(void) {
         av_packet_free(&pkt);
     }
 
-    /* Stop audio thread if buffer isn't running */
+    /* Stop audio thread only if buffer isn't running */
     if(audio_thread_running && !buf_running) {
         audio_thread_running = 0;
         pthread_join(audio_thread, NULL);
@@ -399,6 +434,15 @@ static void recorder_stop_recording(void) {
     int v_count = rec_vcount;
     int64_t* v_pts_arr = v_count > 0 ? malloc(v_count * sizeof(int64_t)) : NULL;
     AVPacket** v_clones = v_count > 0 ? malloc(v_count * sizeof(AVPacket*)) : NULL;
+    if(v_count > 0 && (!v_pts_arr || !v_clones)) {
+        for(int i = 0; i < rec_vcount; i++) av_packet_free(&rec_vbuf[i]);
+        free(rec_vbuf); rec_vbuf = NULL;
+        rec_vcount = 0; rec_vcapacity = 0;
+        pthread_mutex_unlock(&rec_vmutex);
+        free(v_pts_arr); free(v_clones);
+        log_error("Recorder: malloc failed for video clones");
+        return;
+    }
     for(int i = 0; i < v_count; i++) {
         v_pts_arr[i] = rec_vbuf[i]->pts;
         v_clones[i] = av_packet_clone(rec_vbuf[i]);
@@ -417,7 +461,7 @@ static void recorder_stop_recording(void) {
         pcm_copy = malloc(rec_pcm_frames * 2 * 2);
         if(pcm_copy) {
             memcpy(pcm_copy, rec_pcm_buf, rec_pcm_frames * 2 * 2);
-            pcm_num_frames = rec_pcm_frames;
+            pcm_num_frames = rec_pcm_frames / 1024;
         }
     }
     free(rec_pcm_buf); rec_pcm_buf = NULL;
@@ -427,7 +471,7 @@ static void recorder_stop_recording(void) {
     if(v_count == 0) {
         log_warn("Recorder: no video frames captured");
         free(v_pts_arr); free(v_clones); free(pcm_copy);
-        return;
+        goto rec_finalize;
     }
 
     /* ── Encode audio from PCM ─────────────────────────────────────── */
@@ -504,89 +548,96 @@ static void recorder_stop_recording(void) {
     }
 
     /* ── Mux video + audio into final MP4 ──────────────────────────── */
-    AVFormatContext* oc = NULL;
-    avformat_alloc_output_context2(&oc, NULL, "mp4", current_filename);
-    if(!oc) {
-        log_error("Recorder: failed to create muxer for recording");
-        goto rec_cleanup;
-    }
-
-    AVStream* vs = avformat_new_stream(oc, NULL);
-    if(!vs) goto rec_cleanup;
-    avcodec_parameters_from_context(vs->codecpar, venc_ctx);
-    vs->time_base = venc_ctx->time_base;
-
-    AVStream* as = NULL;
-    if(a_count > 0 && save_aenc) {
-        as = avformat_new_stream(oc, NULL);
-        if(as) {
-            avcodec_parameters_from_context(as->codecpar, save_aenc);
-            as->time_base = save_aenc->time_base;
-        }
-    }
-
-    if(avio_open(&oc->pb, current_filename, AVIO_FLAG_WRITE) < 0) {
-        log_error("Recorder: failed to open output file");
-        goto rec_cleanup;
-    }
-    if(avformat_write_header(oc, NULL) < 0) {
-        log_error("Recorder: avformat_write_header failed");
-        goto rec_cleanup;
-    }
-
-    /* Interleave video + audio by PTS */
-    int v_written = 0, a_written = 0;
-    int64_t v_pts_offset = v_clones[0]->pts;
-    int64_t a_pts_offset = a_count > 0 ? a_pts_arr[0] : 0;
-
-    while(v_written < v_count || a_written < a_count) {
-        int use_video = 0;
-        if(v_written >= v_count) use_video = 0;
-        else if(a_written >= a_count) use_video = 1;
-        else {
-            int64_t v_abs = av_rescale_q_rnd(
-                    v_pts_arr[v_written] - v_pts_offset,
-                    venc_ctx->time_base, AV_TIME_BASE_Q, AV_ROUND_NEAR_INF);
-            int64_t a_abs = av_rescale_q_rnd(
-                    a_pts_arr[a_written] - a_pts_offset,
-                    as->time_base, AV_TIME_BASE_Q, AV_ROUND_NEAR_INF);
-            use_video = (v_abs <= a_abs);
+    {
+        AVFormatContext* oc = NULL;
+        avformat_alloc_output_context2(&oc, NULL, "mp4", current_filename);
+        if(!oc) {
+            log_error("Recorder: failed to create muxer for recording");
+            goto rec_cleanup;
         }
 
-        if(use_video) {
-            AVPacket out = {0};
-            av_packet_ref(&out, v_clones[v_written]);
-            out.pts = av_rescale_q_rnd(
-                    v_pts_arr[v_written] - v_pts_offset,
-                    venc_ctx->time_base, vs->time_base, AV_ROUND_NEAR_INF);
-            out.dts = out.pts;
-            out.duration = av_rescale_q(
-                    v_clones[v_written]->duration, venc_ctx->time_base, vs->time_base);
-            out.stream_index = 0;
-            av_interleaved_write_frame(oc, &out);
-            v_written++;
-        } else {
-            AVPacket out = {0};
-            av_packet_ref(&out, a_packets[a_written]);
-            out.pts = a_pts_arr[a_written] - a_pts_offset;
-            out.dts = out.pts;
-            out.duration = a_packets[a_written]->duration;
-            out.stream_index = 1;
-            av_interleaved_write_frame(oc, &out);
-            a_written++;
+        AVStream* vs = avformat_new_stream(oc, NULL);
+        if(!vs) goto rec_cleanup;
+        avcodec_parameters_from_context(vs->codecpar, rec_venc_ctx);
+        vs->time_base = rec_venc_ctx->time_base;
+
+        AVStream* as = NULL;
+        if(a_count > 0 && save_aenc) {
+            as = avformat_new_stream(oc, NULL);
+            if(as) {
+                avcodec_parameters_from_context(as->codecpar, save_aenc);
+                as->time_base = save_aenc->time_base;
+            } else {
+                a_count = 0;
+            }
         }
+
+        if(avio_open(&oc->pb, current_filename, AVIO_FLAG_WRITE) < 0) {
+            log_error("Recorder: failed to open output file");
+            goto rec_cleanup;
+        }
+        if(avformat_write_header(oc, NULL) < 0) {
+            log_error("Recorder: avformat_write_header failed");
+            goto rec_cleanup;
+        }
+
+        /* Interleave video + audio by PTS */
+        int v_written = 0, a_written = 0;
+        int64_t v_pts_offset = v_clones[0]->pts;
+        int64_t a_pts_offset = a_count > 0 ? a_pts_arr[0] : 0;
+
+        while(v_written < v_count || a_written < a_count) {
+            int use_video = 0;
+            if(v_written >= v_count) use_video = 0;
+            else if(a_written >= a_count) use_video = 1;
+            else {
+                int64_t v_abs = av_rescale_q_rnd(
+                        v_pts_arr[v_written] - v_pts_offset,
+                        rec_venc_ctx->time_base, AV_TIME_BASE_Q, AV_ROUND_NEAR_INF);
+                int64_t a_abs = av_rescale_q_rnd(
+                        a_pts_arr[a_written] - a_pts_offset,
+                        as->time_base, AV_TIME_BASE_Q, AV_ROUND_NEAR_INF);
+                use_video = (v_abs <= a_abs);
+            }
+
+            if(use_video) {
+                AVPacket out = {0};
+                av_packet_ref(&out, v_clones[v_written]);
+                out.pts = av_rescale_q_rnd(
+                        v_pts_arr[v_written] - v_pts_offset,
+                        rec_venc_ctx->time_base, vs->time_base, AV_ROUND_NEAR_INF);
+                out.dts = out.pts;
+                out.duration = av_rescale_q(
+                        v_clones[v_written]->duration, rec_venc_ctx->time_base, vs->time_base);
+                out.stream_index = 0;
+                if(av_interleaved_write_frame(oc, &out) < 0)
+                    log_error("Recorder: av_interleaved_write_frame failed for video");
+                v_written++;
+            } else {
+                AVPacket out = {0};
+                av_packet_ref(&out, a_packets[a_written]);
+                out.pts = a_pts_arr[a_written] - a_pts_offset;
+                out.dts = out.pts;
+                out.duration = a_packets[a_written]->duration;
+                out.stream_index = 1;
+                if(av_interleaved_write_frame(oc, &out) < 0)
+                    log_error("Recorder: av_interleaved_write_frame failed for audio");
+                a_written++;
+            }
+        }
+
+        av_write_trailer(oc);
+        avio_closep(&oc->pb);
+        avformat_free_context(oc);
+        oc = NULL;
+
+        log_info("Recorder: saved recording as %s (%d video, %d audio packets)",
+                 current_filename, v_count, a_count);
+
+    rec_cleanup:
+        if(oc) { avio_closep(&oc->pb); avformat_free_context(oc); }
     }
 
-    av_write_trailer(oc);
-    avio_closep(&oc->pb);
-    avformat_free_context(oc);
-    oc = NULL;
-
-    log_info("Recorder: saved recording as %s (%d video, %d audio packets)",
-             current_filename, v_count, a_count);
-
-rec_cleanup:
-    if(oc) { avio_closep(&oc->pb); avformat_free_context(oc); }
     free(v_pts_arr); free(a_pts_arr);
     for(int i = 0; i < v_count; i++) av_packet_free(&v_clones[i]);
     free(v_clones);
@@ -597,12 +648,11 @@ rec_cleanup:
     if(save_aframe) av_frame_free(&save_aframe);
     if(save_aenc) avcodec_free_context(&save_aenc);
 
-    /* Free encoder resources if buffer isn't running */
-    if(!buf_running) {
-        if(vsws) { sws_freeContext(vsws); vsws = NULL; }
-        if(vframe) { av_frame_free(&vframe); vframe = NULL; }
-        if(venc_ctx) { avcodec_free_context(&venc_ctx); venc_ctx = NULL; }
-    }
+rec_finalize:
+    /* Always free recording's own encoder resources */
+    if(rec_vsws) { sws_freeContext(rec_vsws); rec_vsws = NULL; }
+    if(rec_vframe) { av_frame_free(&rec_vframe); rec_vframe = NULL; }
+    if(rec_venc_ctx) { avcodec_free_context(&rec_venc_ctx); rec_venc_ctx = NULL; }
 }
 
 void recorder_toggle_recording(void) {
@@ -612,7 +662,78 @@ void recorder_toggle_recording(void) {
         recorder_start_recording();
 }
 
-/* ── Audio capture thread ────────────────────────────────────────────── */
+/* ── Recording encode worker thread (recording only) ───────────────── */
+
+static void* rec_encode_worker_thread(void* arg) {
+    (void)arg;
+    log_info("Recorder: recording encode thread started");
+
+    while(rec_encode_thread_running || rec_raw_count > 0) {
+        pthread_mutex_lock(&rec_raw_mutex);
+        while(rec_raw_count == 0 && rec_encode_thread_running) {
+            pthread_cond_wait(&rec_raw_cond, &rec_raw_mutex);
+        }
+        if(rec_raw_count == 0) {
+            pthread_mutex_unlock(&rec_raw_mutex);
+            break;
+        }
+        RawFrame rf = rec_raw_frames[rec_raw_head];
+        rec_raw_head = (rec_raw_head + 1) % MAX_RAW_FRAMES;
+        rec_raw_count--;
+        pthread_mutex_unlock(&rec_raw_mutex);
+
+        int cur_w = settings.window_width;
+        int cur_h = settings.window_height;
+        unsigned char* pixels = rf.data;
+
+        if(rec_venc_ctx && rec_vframe && rec_vsws
+           && cur_w == rec_buf_w && cur_h == rec_buf_h) {
+            uint8_t* src_data[] = { pixels + (cur_h - 1) * cur_w * 4 };
+            int src_stride[] = { -cur_w * 4 };
+            sws_scale(rec_vsws, (const uint8_t* const*)src_data, src_stride, 0, cur_h,
+                      rec_vframe->data, rec_vframe->linesize);
+
+            rec_vframe->pts = av_rescale_q(rf.capture_time_us - rec_start_time,
+                                          (AVRational){1, 1000000},
+                                          rec_venc_ctx->time_base);
+            int ret = avcodec_send_frame(rec_venc_ctx, rec_vframe);
+            if(ret < 0) {
+                log_error("Recorder: recording video encode send failed");
+            } else {
+                AVPacket* pkt = av_packet_alloc();
+                while(avcodec_receive_packet(rec_venc_ctx, pkt) == 0) {
+                    pkt->duration = 1;
+                    pthread_mutex_lock(&rec_vmutex);
+                    if(rec_vcount >= rec_vcapacity) {
+                        rec_vcapacity = rec_vcapacity ? rec_vcapacity * 2 : 4096;
+                        AVPacket** new_buf = realloc(rec_vbuf, rec_vcapacity * sizeof(AVPacket*));
+                        if(!new_buf) {
+                            rec_vcapacity = rec_vcount;
+                            av_packet_free(&pkt);
+                            pthread_mutex_unlock(&rec_vmutex);
+                        } else {
+                            rec_vbuf = new_buf;
+                            rec_vbuf[rec_vcount++] = pkt;
+                            pthread_mutex_unlock(&rec_vmutex);
+                        }
+                    } else {
+                        rec_vbuf[rec_vcount++] = pkt;
+                        pthread_mutex_unlock(&rec_vmutex);
+                    }
+                    pkt = av_packet_alloc();
+                }
+                av_packet_free(&pkt);
+            }
+        }
+
+        free(pixels);
+    }
+
+    log_info("Recorder: recording encode thread stopped");
+    return NULL;
+}
+
+/* ── Audio capture thread (shared — writes to active pipeline(s)) ──── */
 
 static void* audio_capture_thread(void* arg) {
     (void)arg;
@@ -627,7 +748,7 @@ static void* audio_capture_thread(void* arg) {
                                  settings.audio_monitor_source[0] ? settings.audio_monitor_source : NULL,
                                  "replay-buffer", &ss, NULL, NULL, &error);
     if(!s) {
-        log_warn("Audio capture unavailable for replay buffer: %s", pa_strerror(error));
+        log_warn("Audio capture unavailable: %s", pa_strerror(error));
         return NULL;
     }
 
@@ -675,12 +796,15 @@ static void* audio_capture_thread(void* arg) {
     return NULL;
 }
 
-/* ── Encoding worker thread (buffer + recording) ────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════
+   REPLAY BUFFER (F8) — fully independent pipeline
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Buffer encode worker thread (buffer only) ─────────────────────── */
 
 static void* encode_worker_thread(void* arg) {
     (void)arg;
-    unsigned char* pixels = NULL;
-    int cur_w = 0, cur_h = 0;
+    log_info("Recorder: buffer encode thread started");
 
     while(encode_thread_running || raw_count > 0) {
         pthread_mutex_lock(&raw_mutex);
@@ -696,115 +820,43 @@ static void* encode_worker_thread(void* arg) {
         raw_count--;
         pthread_mutex_unlock(&raw_mutex);
 
-        cur_w = settings.window_width;
-        cur_h = settings.window_height;
-        pixels = rf.data;
+        int cur_w = settings.window_width;
+        int cur_h = settings.window_height;
+        unsigned char* pixels = rf.data;
 
-        int enc_w = rec_running ? rec_buf_w : buf_w;
-        int enc_h = rec_running ? rec_buf_h : buf_h;
-        if((buf_running || rec_running) && (cur_w != enc_w || cur_h != enc_h)) {
-            log_warn("Recorder: dimension mismatch (window=%dx%d, encoder=%dx%d) — reinitializing",
-                     cur_w, cur_h, enc_w, enc_h);
-            if(rec_running) { rec_buf_w = cur_w; rec_buf_h = cur_h; }
-            if(buf_running) { buf_w = cur_w; buf_h = cur_h; }
-            enc_w = cur_w;
-            enc_h = cur_h;
-            /* Rebuild encoder with new dimensions */
-            if(vsws) { sws_freeContext(vsws); vsws = NULL; }
-            if(vframe) { av_frame_free(&vframe); vframe = NULL; }
-            if(venc_ctx) { avcodec_free_context(&venc_ctx); venc_ctx = NULL; }
-            const AVCodec* venc = avcodec_find_encoder_by_name("libx264");
-            if(venc) {
-                venc_ctx = avcodec_alloc_context3(venc);
-                if(venc_ctx) {
-                    venc_ctx->width = cur_w;
-                    venc_ctx->height = cur_h;
-                    venc_ctx->time_base = (AVRational){ 1, target_fps };
-                    venc_ctx->framerate = (AVRational){ target_fps, 1 };
-                    venc_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
-                    venc_ctx->bit_rate = target_bitrate_kbps * 1000;
-                    venc_ctx->rc_max_rate = target_bitrate_kbps * 1000;
-                    venc_ctx->rc_buffer_size = target_bitrate_kbps * 1000 * 2;
-                    venc_ctx->gop_size = target_fps;
-                    venc_ctx->max_b_frames = 0;
-                    venc_ctx->profile = FF_PROFILE_H264_HIGH;
-                    venc_ctx->level = 41;
-                    av_opt_set(venc_ctx->priv_data, "preset", "veryfast", 0);
-                    av_opt_set(venc_ctx->priv_data, "tune", "zerolatency", 0);
-                    if(avcodec_open2(venc_ctx, venc, NULL) < 0) {
-                        log_error("Recorder: failed to reinit encoder (%dx%d)", cur_w, cur_h);
-                        avcodec_free_context(&venc_ctx); venc_ctx = NULL;
-                    } else {
-                        vframe = av_frame_alloc();
-                        if(vframe) {
-                            vframe->format = AV_PIX_FMT_YUV420P;
-                            vframe->width = cur_w;
-                            vframe->height = cur_h;
-                            if(av_frame_get_buffer(vframe, 0) < 0) {
-                                av_frame_free(&vframe); vframe = NULL;
-                            }
-                        }
-                        vsws = sws_getContext(cur_w, cur_h, AV_PIX_FMT_RGBA,
-                                              cur_w, cur_h, AV_PIX_FMT_YUV420P,
-                                              SWS_BILINEAR, NULL, NULL, NULL);
-                        log_info("Recorder: encoder reinited for %dx%d", cur_w, cur_h);
-                    }
-                }
-            }
-        }
-        if((buf_running || rec_running) && venc_ctx && vframe && vsws && cur_w == enc_w && cur_h == enc_h) {
+        if(venc_ctx && vframe && vsws && cur_w == buf_w && cur_h == buf_h) {
             uint8_t* src_data[] = { pixels + (cur_h - 1) * cur_w * 4 };
             int src_stride[] = { -cur_w * 4 };
             sws_scale(vsws, (const uint8_t* const*)src_data, src_stride, 0, cur_h,
                       vframe->data, vframe->linesize);
 
-            int64_t ref_time = buf_running ? buffer_start_time : rec_start_time;
-            vframe->pts = av_rescale_q(rf.capture_time_us - ref_time,
+            vframe->pts = av_rescale_q(rf.capture_time_us - buffer_start_time,
                                       (AVRational){1, 1000000},
                                       venc_ctx->time_base);
             int ret = avcodec_send_frame(venc_ctx, vframe);
             if(ret < 0) {
-                log_error("Recorder: video encode send failed");
+                log_error("Recorder: buffer video encode send failed");
             } else {
                 AVPacket* pkt = av_packet_alloc();
                 while(avcodec_receive_packet(venc_ctx, pkt) == 0) {
                     pkt->duration = 1;
-                    /* Push to recording growing buffer (clone first, before vbuf_push takes ownership) */
-                    if(rec_running) {
-                        AVPacket* clone = av_packet_clone(pkt);
-                        if(clone) {
-                            pthread_mutex_lock(&rec_vmutex);
-                            if(rec_vcount >= rec_vcapacity) {
-                                rec_vcapacity = rec_vcapacity ? rec_vcapacity * 2 : 4096;
-                                rec_vbuf = realloc(rec_vbuf, rec_vcapacity * sizeof(AVPacket*));
-                            }
-                            rec_vbuf[rec_vcount++] = clone;
-                            pthread_mutex_unlock(&rec_vmutex);
-                        }
-                    }
-                    /* Push to buffer circular buffer (takes ownership) */
-                    if(buf_running)
-                        vbuf_push(pkt);
-                    else
-                        av_packet_free(&pkt);
+                    vbuf_push(pkt);
                     pkt = av_packet_alloc();
                 }
                 av_packet_free(&pkt);
             }
 
-            if(buf_running)
-                vbuf_trim((double)settings.replay_duration);
+            vbuf_trim((double)settings.replay_duration);
         }
 
         free(pixels);
-        pixels = NULL;
     }
 
-    free(pixels);
+    log_info("Recorder: buffer encode thread stopped");
     return NULL;
 }
 
-/* ── Replay buffer start / stop ──────────────────────────────────────── */
+/* ── Replay buffer start / stop ────────────────────────────────────── */
 
 void recorder_buffer_start(void) {
     log_info("Recorder: starting replay buffer...");
@@ -822,80 +874,69 @@ void recorder_buffer_start(void) {
     buf_w = w;
     buf_h = h;
 
-    /* Reuse encoder from recording if active, otherwise allocate new one */
-    if(rec_running && venc_ctx && venc_ctx->width == w && venc_ctx->height == h) {
-        log_info("Recorder: reusing video encoder from recording for buffer (%dx%d)", w, h);
-    } else {
-        if(venc_ctx) {
-            log_info("Recorder: freeing stale encoder (was %dx%d, need %dx%d)",
-                     venc_ctx->width, venc_ctx->height, w, h);
-            if(vsws) { sws_freeContext(vsws); vsws = NULL; }
-            if(vframe) { av_frame_free(&vframe); vframe = NULL; }
-            avcodec_free_context(&venc_ctx); venc_ctx = NULL;
-        }
-
-        /* Allocate video encoder (libx264) */
-        const AVCodec* venc = avcodec_find_encoder_by_name("libx264");
-        if(!venc) { log_error("Recorder: libx264 encoder not found"); return; }
-
-        venc_ctx = avcodec_alloc_context3(venc);
-        if(!venc_ctx) { log_error("Recorder: failed to alloc video codec context"); return; }
-
-        venc_ctx->width = w;
-        venc_ctx->height = h;
-        venc_ctx->time_base = (AVRational){ 1, target_fps };
-        venc_ctx->framerate = (AVRational){ target_fps, 1 };
-        venc_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
-        venc_ctx->bit_rate = target_bitrate_kbps * 1000;
-        venc_ctx->rc_max_rate = target_bitrate_kbps * 1000;
-        venc_ctx->rc_buffer_size = target_bitrate_kbps * 1000 * 2;
-        venc_ctx->gop_size = target_fps;
-        venc_ctx->max_b_frames = 0;
-        venc_ctx->profile = FF_PROFILE_H264_HIGH;
-        venc_ctx->level = 41;
-        av_opt_set(venc_ctx->priv_data, "preset", "veryfast", 0);
-        av_opt_set(venc_ctx->priv_data, "tune", "zerolatency", 0);
-
-        if(avcodec_open2(venc_ctx, venc, NULL) < 0) {
-            log_error("Recorder: failed to open video encoder (%dx%d)", w, h);
-            avcodec_free_context(&venc_ctx);
-            return;
-        }
-
-        /* Allocate video frame (YUV420P) */
-        vframe = av_frame_alloc();
-        if(!vframe) { log_error("Recorder: failed to alloc video frame"); avcodec_free_context(&venc_ctx); venc_ctx = NULL; return; }
-        vframe->format = AV_PIX_FMT_YUV420P;
-        vframe->width = w;
-        vframe->height = h;
-        if(av_frame_get_buffer(vframe, 0) < 0) {
-            log_error("Recorder: failed to alloc video frame buffer");
-            av_frame_free(&vframe); vframe = NULL;
-            avcodec_free_context(&venc_ctx); venc_ctx = NULL;
-            return;
-        }
-
-        /* Allocate SWScale for RGBA→YUV420P */
-        vsws = sws_getContext(w, h, AV_PIX_FMT_RGBA, w, h, AV_PIX_FMT_YUV420P,
-                              SWS_BILINEAR, NULL, NULL, NULL);
-        if(!vsws) {
-            log_error("Recorder: failed to alloc SWScale");
-            av_frame_free(&vframe); vframe = NULL;
-            avcodec_free_context(&venc_ctx); venc_ctx = NULL;
-            return;
-        }
-        log_info("Recorder: video encoder ready for buffer (%dx%d)", w, h);
+    /* Always allocate a fresh encoder for the buffer */
+    if(venc_ctx) {
+        if(vsws) { sws_freeContext(vsws); vsws = NULL; }
+        if(vframe) { av_frame_free(&vframe); vframe = NULL; }
+        avcodec_free_context(&venc_ctx); venc_ctx = NULL;
     }
+
+    const AVCodec* venc = avcodec_find_encoder_by_name("libx264");
+    if(!venc) { log_error("Recorder: libx264 encoder not found"); return; }
+
+    venc_ctx = avcodec_alloc_context3(venc);
+    if(!venc_ctx) { log_error("Recorder: failed to alloc video codec context"); return; }
+
+    venc_ctx->width = w;
+    venc_ctx->height = h;
+    venc_ctx->time_base = (AVRational){ 1, target_fps };
+    venc_ctx->framerate = (AVRational){ target_fps, 1 };
+    venc_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
+    venc_ctx->bit_rate = target_bitrate_kbps * 1000;
+    venc_ctx->rc_max_rate = target_bitrate_kbps * 1000;
+    venc_ctx->rc_buffer_size = target_bitrate_kbps * 1000 * 2;
+    venc_ctx->gop_size = target_fps;
+    venc_ctx->max_b_frames = 0;
+    venc_ctx->profile = FF_PROFILE_H264_HIGH;
+    venc_ctx->level = 41;
+    av_opt_set(venc_ctx->priv_data, "preset", "veryfast", 0);
+    av_opt_set(venc_ctx->priv_data, "tune", "zerolatency", 0);
+
+    if(avcodec_open2(venc_ctx, venc, NULL) < 0) {
+        log_error("Recorder: failed to open video encoder (%dx%d)", w, h);
+        avcodec_free_context(&venc_ctx);
+        return;
+    }
+
+    vframe = av_frame_alloc();
+    if(!vframe) { log_error("Recorder: failed to alloc video frame"); avcodec_free_context(&venc_ctx); venc_ctx = NULL; return; }
+    vframe->format = AV_PIX_FMT_YUV420P;
+    vframe->width = w;
+    vframe->height = h;
+    if(av_frame_get_buffer(vframe, 0) < 0) {
+        log_error("Recorder: failed to alloc video frame buffer");
+        av_frame_free(&vframe); vframe = NULL;
+        avcodec_free_context(&venc_ctx); venc_ctx = NULL;
+        return;
+    }
+
+    vsws = sws_getContext(w, h, AV_PIX_FMT_RGBA, w, h, AV_PIX_FMT_YUV420P,
+                          SWS_BILINEAR, NULL, NULL, NULL);
+    if(!vsws) {
+        log_error("Recorder: failed to alloc SWScale");
+        av_frame_free(&vframe); vframe = NULL;
+        avcodec_free_context(&venc_ctx); venc_ctx = NULL;
+        return;
+    }
+    log_info("Recorder: video encoder ready for buffer (%dx%d)", w, h);
 
     /* Allocate circular buffers */
     vbuf = calloc(MAX_PACKETS, sizeof(AVPacket*));
     if(!vbuf) {
         log_error("Recorder: failed to allocate circular buffer");
-        if(!rec_running) {
-            sws_freeContext(vsws); vsws = NULL;
-            av_frame_free(&vframe); vframe = NULL;
-            avcodec_free_context(&venc_ctx); venc_ctx = NULL;
-        }
+        sws_freeContext(vsws); vsws = NULL;
+        av_frame_free(&vframe); vframe = NULL;
+        avcodec_free_context(&venc_ctx); venc_ctx = NULL;
         return;
     }
 
@@ -905,11 +946,9 @@ void recorder_buffer_start(void) {
     if(!pcm_buf) {
         log_error("Recorder: failed to allocate PCM ring buffer (%d bytes)", pcm_max_bytes);
         free(vbuf); vbuf = NULL;
-        if(!rec_running) {
-            sws_freeContext(vsws); vsws = NULL;
-            av_frame_free(&vframe); vframe = NULL;
-            avcodec_free_context(&venc_ctx); venc_ctx = NULL;
-        }
+        sws_freeContext(vsws); vsws = NULL;
+        av_frame_free(&vframe); vframe = NULL;
+        avcodec_free_context(&venc_ctx); venc_ctx = NULL;
         return;
     }
 
@@ -921,7 +960,7 @@ void recorder_buffer_start(void) {
 
     buffer_start_time = av_gettime();
 
-    /* Start audio capture thread (skip if already running from recording) */
+    /* Start audio capture thread if not already running */
     if(!audio_thread_running) {
         audio_thread_running = 1;
         if(pthread_create(&audio_thread, NULL, audio_capture_thread, NULL) != 0) {
@@ -930,21 +969,18 @@ void recorder_buffer_start(void) {
         }
     }
 
-    /* Start encoding worker thread (skip if already running from recording) */
-    if(!encode_thread_running) {
-        raw_head = raw_tail = raw_count = 0;
-        encode_thread_running = 1;
-        if(pthread_create(&encode_thread, NULL, encode_worker_thread, NULL) != 0) {
-            log_error("Recorder: failed to start encode worker thread");
-            encode_thread_running = 0;
-            return;
-        }
+    /* Start buffer's own encode thread */
+    raw_head = raw_tail = raw_count = 0;
+    encode_thread_running = 1;
+    if(pthread_create(&encode_thread, NULL, encode_worker_thread, NULL) != 0) {
+        log_error("Recorder: failed to start buffer encode worker thread");
+        encode_thread_running = 0;
+        return;
     }
 
     buf_running = 1;
     last_capture_time = 0;
-    log_info("Recorder: replay buffer started (buf_running=%d, encode_thread=%d, audio_thread=%d)",
-             buf_running, encode_thread_running, audio_thread_running);
+    log_info("Recorder: replay buffer started");
 }
 
 void recorder_buffer_stop(void) {
@@ -953,8 +989,8 @@ void recorder_buffer_stop(void) {
 
     log_info("Recorder: stopping replay buffer");
 
-    /* Drain raw frame queue (wake worker, wait for it to finish) — only if recording isn't still using it */
-    if(encode_thread_running && !rec_running) {
+    /* Always stop buffer's encode thread */
+    if(encode_thread_running) {
         pthread_mutex_lock(&raw_mutex);
         encode_thread_running = 0;
         pthread_cond_broadcast(&raw_cond);
@@ -969,14 +1005,16 @@ void recorder_buffer_stop(void) {
     }
 
     /* Drain video encoder */
-    avcodec_send_frame(venc_ctx, NULL);
-    AVPacket* pkt = av_packet_alloc();
-    while(avcodec_receive_packet(venc_ctx, pkt) == 0) {
-        pkt->duration = 1;
-        vbuf_push(pkt);
-        pkt = av_packet_alloc();
+    if(venc_ctx) {
+        avcodec_send_frame(venc_ctx, NULL);
+        AVPacket* pkt = av_packet_alloc();
+        while(avcodec_receive_packet(venc_ctx, pkt) == 0) {
+            pkt->duration = 1;
+            vbuf_push(pkt);
+            pkt = av_packet_alloc();
+        }
+        av_packet_free(&pkt);
     }
-    av_packet_free(&pkt);
 
     /* Free circular buffers */
     pthread_mutex_lock(&vbuf_mutex);
@@ -998,13 +1036,11 @@ void recorder_buffer_stop(void) {
     pcm_write_byte = 0;
     pthread_mutex_unlock(&pcm_mutex);
 
-    /* Free encoder resources only if recording is not still active */
-    if(!rec_running) {
-        if(vsws) { sws_freeContext(vsws); vsws = NULL; }
-        if(vframe) { av_frame_free(&vframe); vframe = NULL; }
-        if(venc_ctx) { avcodec_free_context(&venc_ctx); venc_ctx = NULL; }
-        raw_head = raw_tail = raw_count = 0;
-    }
+    /* Always free buffer's encoder resources */
+    if(vsws) { sws_freeContext(vsws); vsws = NULL; }
+    if(vframe) { av_frame_free(&vframe); vframe = NULL; }
+    if(venc_ctx) { avcodec_free_context(&venc_ctx); venc_ctx = NULL; }
+    raw_head = raw_tail = raw_count = 0;
 
     log_info("Recorder: replay buffer stopped");
 }
@@ -1016,7 +1052,7 @@ void recorder_toggle_buffer(void) {
         recorder_buffer_start();
 }
 
-/* ── Replay save (F8) — mux from RAM buffers ─────────────────────────── */
+/* ── Replay save (F8) — mux from RAM buffers ────────────────────────── */
 
 int recorder_save_replay(void) {
     if(!buf_running && vbuf_count == 0) {
@@ -1318,10 +1354,12 @@ int recorder_save_replay(void) {
     return 1;
 }
 
-/* ── Frame capture ───────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════
+   FRAME CAPTURE — pushes to both pipelines independently
+   ══════════════════════════════════════════════════════════════════════ */
 
 void recorder_capture_frame(void) {
-    if(!rec_running && !buf_running && !encode_thread_running)
+    if(!rec_running && !buf_running)
         return;
 
     double now = window_time();
@@ -1346,62 +1384,58 @@ void recorder_capture_frame(void) {
     }
 
     int buf_size = cur_w * cur_h * 4;
-    unsigned char* pixels = malloc(buf_size);
-    if(!pixels)
-        return;
 
-    glReadBuffer(GL_BACK);
-    glReadPixels(0, 0, cur_w, cur_h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    /* Push to recording pipeline (independent) */
+    if(rec_running && rec_encode_thread_running) {
+        unsigned char* rec_pixels = malloc(buf_size);
+        if(rec_pixels) {
+            glReadBuffer(GL_BACK);
+            glReadPixels(0, 0, cur_w, cur_h, GL_RGBA, GL_UNSIGNED_BYTE, rec_pixels);
 
-    /* Buffer/recording encoding: push to worker thread (off main thread) */
-    if((rec_running || buf_running) && encode_thread_running) {
-        RawFrame rf;
-        rf.data = pixels;
-        rf.size = buf_size;
-        rf.capture_time_us = av_gettime();
+            RawFrame rf;
+            rf.data = rec_pixels;
+            rf.size = buf_size;
+            rf.capture_time_us = av_gettime();
 
-        pthread_mutex_lock(&raw_mutex);
-        if(raw_count < MAX_RAW_FRAMES) {
-            raw_frames[raw_tail] = rf;
-            raw_tail = (raw_tail + 1) % MAX_RAW_FRAMES;
-            raw_count++;
-            pthread_cond_signal(&raw_cond);
-            pthread_mutex_unlock(&raw_mutex);
-            if(rec_running) rec_frames++;
-            return;
-        } else {
-            pthread_mutex_unlock(&raw_mutex);
-            free(pixels);
-        }
-    } else if(buf_running) {
-        /* Buffer active but no worker thread (shouldn't happen) — encode on main thread */
-        if(settings.window_width == buf_w && settings.window_height == buf_h) {
-            uint8_t* src_data[] = { pixels + (buf_h - 1) * buf_w * 4 };
-            int src_stride[] = { -buf_w * 4 };
-            sws_scale(vsws, (const uint8_t* const*)src_data, src_stride, 0, buf_h,
-                      vframe->data, vframe->linesize);
-
-            vframe->pts = av_rescale_q(av_gettime() - buffer_start_time,
-                                      (AVRational){1, 1000000},
-                                      venc_ctx->time_base);
-            int ret = avcodec_send_frame(venc_ctx, vframe);
-            if(ret < 0) {
-                log_error("Recorder: video encode send failed");
+            pthread_mutex_lock(&rec_raw_mutex);
+            if(rec_raw_count < MAX_RAW_FRAMES) {
+                rec_raw_frames[rec_raw_tail] = rf;
+                rec_raw_tail = (rec_raw_tail + 1) % MAX_RAW_FRAMES;
+                rec_raw_count++;
+                pthread_cond_signal(&rec_raw_cond);
+                pthread_mutex_unlock(&rec_raw_mutex);
+                rec_frames++;
             } else {
-                AVPacket* pkt = av_packet_alloc();
-                while(avcodec_receive_packet(venc_ctx, pkt) == 0) {
-                    pkt->duration = 1;
-                    vbuf_push(pkt);
-                    pkt = av_packet_alloc();
-                }
-                av_packet_free(&pkt);
+                pthread_mutex_unlock(&rec_raw_mutex);
+                free(rec_pixels);
             }
-            vbuf_trim((double)settings.replay_duration);
         }
-        free(pixels);
-    } else {
-        /* Not recording, not buffering — discard pixels */
-        free(pixels);
+    }
+
+    /* Push to buffer pipeline (independent) */
+    if(buf_running && encode_thread_running) {
+        unsigned char* buf_pixels = malloc(buf_size);
+        if(buf_pixels) {
+            glReadBuffer(GL_BACK);
+            glReadPixels(0, 0, cur_w, cur_h, GL_RGBA, GL_UNSIGNED_BYTE, buf_pixels);
+
+            RawFrame rf;
+            rf.data = buf_pixels;
+            rf.size = buf_size;
+            rf.capture_time_us = av_gettime();
+
+            pthread_mutex_lock(&raw_mutex);
+            if(raw_count < MAX_RAW_FRAMES) {
+                raw_frames[raw_tail] = rf;
+                raw_tail = (raw_tail + 1) % MAX_RAW_FRAMES;
+                raw_count++;
+                pthread_cond_signal(&raw_cond);
+                pthread_mutex_unlock(&raw_mutex);
+            } else {
+                pthread_mutex_unlock(&raw_mutex);
+                free(buf_pixels);
+            }
+        }
     }
 }
 

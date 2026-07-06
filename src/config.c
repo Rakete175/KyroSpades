@@ -346,6 +346,8 @@ void config_save() {
         config_seti("client", "recording_bitrate", settings.recording_bitrate_kbps);
         config_seti("client", "replay_enabled", settings.replay_enabled);
         config_seti("client", "replay_duration", settings.replay_duration);
+        config_seti("client", "replay_save_hotkey", settings.replay_save_hotkey);
+        config_sets("client", "audio_monitor_source", settings.audio_monitor_source);
 
         config_sets("meta", "backend", CONFIG_BACKEND);
 
@@ -474,6 +476,8 @@ static int config_read_key(void* user, const char* section, const char* name, co
                 IMPORT_SETTING(settings.recording_bitrate_kbps, recording_bitrate, atoi(value));
                 IMPORT_SETTING(settings.replay_enabled, replay_enabled, atoi(value));
                 IMPORT_SETTING(settings.replay_duration, replay_duration, atoi(value));
+                IMPORT_SETTING(settings.replay_save_hotkey, replay_save_hotkey, atoi(value));
+                IMPORT_SETTING_STR(settings.audio_monitor_source, audio_monitor_source);
         }
         if(!strcmp(section, "meta")) {
                 if(!strcmp(name, "backend")) {
@@ -684,7 +688,7 @@ void config_reload() {
         config_register_key(WINDOW_KEY_HIDEHUD, SDLK_F6, "hide_hud", 1, "Hide HUD", "Game");
         config_register_key(WINDOW_KEY_LASTTOOL, SDLK_q, "last_tool", 0, "Last tool", "Tools & Weapons");
         config_register_key(WINDOW_KEY_NETWORKSTATS, SDLK_F12, "network_stats", 1, "Network stats", "Information");
-         config_register_key(WINDOW_KEY_SAVE_MAP, SDLK_F8, "save_map", 0, "Save map", "Game");
+         config_register_key(WINDOW_KEY_SAVE_MAP, SDLK_F9, "save_map", 0, "Save map", "Game");
         config_register_key(WINDOW_KEY_SELECT1, SDLK_1, NULL, 0, NULL, NULL);
         config_register_key(WINDOW_KEY_SELECT2, SDLK_2, NULL, 0, NULL, NULL);
         config_register_key(WINDOW_KEY_SELECT3, SDLK_3, NULL, 0, NULL, NULL);
@@ -751,7 +755,7 @@ void config_reload() {
         config_register_key(WINDOW_KEY_HIDEHUD, GLFW_KEY_F6, "hide_hud", 1, "Hide HUD", "Game");
         config_register_key(WINDOW_KEY_LASTTOOL, GLFW_KEY_Q, "last_tool", 0, "Last tool", "Tools & Weapons");
         config_register_key(WINDOW_KEY_NETWORKSTATS, GLFW_KEY_F12, "network_stats", 1, "Network stats", "Information");
-         config_register_key(WINDOW_KEY_SAVE_MAP, GLFW_KEY_F8, "save_map", 0, "Save map", "Game");
+         config_register_key(WINDOW_KEY_SAVE_MAP, GLFW_KEY_F9, "save_map", 0, "Save map", "Game");
         config_register_key(WINDOW_KEY_SELECT1, GLFW_KEY_1, NULL, 0, NULL, NULL);
         config_register_key(WINDOW_KEY_SELECT2, GLFW_KEY_2, NULL, 0, NULL, NULL);
         config_register_key(WINDOW_KEY_SELECT3, GLFW_KEY_3, NULL, 0, NULL, NULL);

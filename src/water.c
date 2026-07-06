@@ -47,6 +47,8 @@ static struct {
 	unsigned int cursor;
 	int span;
 
+	float last_cam_x, last_cam_z;
+
 	struct tesselator tess;
 	struct glx_displaylist dl;
 	bool gl_init;
@@ -145,6 +147,17 @@ static int water_wrap(int v, int m) {
 	return ((v % m) + m) % m;
 }
 
+/* Find the color of the terrain beneath the water at (wx, wz).  Scans
+   downward from WATER_LEVEL for the first solid block; returns a default
+   deep-water tone if nothing is found (void column). */
+static uint32_t water_seabed_color(int wx, int wz) {
+	for (int y = (int)WATER_LEVEL - 1; y >= 0; y--) {
+		if (!map_isair_nolock(wx, y, wz))
+			return map_get_nolock(wx, y, wz);
+	}
+	return rgba(30, 60, 90, 255);
+}
+
 static uint32_t water_cell_compute(int x, int z, int wx, int wz) {
 	float px = x + 0.5F;
 	float pz = z + 0.5F;
@@ -174,7 +187,7 @@ static uint32_t water_cell_compute(int x, int z, int wx, int wz) {
 		hb = fog_color[2] * 255.0F;
 	}
 
-	uint32_t wc = map_get_nolock(wx, 0, wz);
+	uint32_t wc = water_seabed_color(wx, wz);
 	float h = cell_hash(wx, wz);
 	float shimmer = 0.85F + 0.22F * h + 0.08F * sinf(wr.job.time * (0.6F + h) + h * 6.2831F);
 	float wr_ = red(wc) * shimmer;
@@ -295,6 +308,16 @@ void water_reflection_pass(void) {
 		pthread_mutex_unlock(&water_lock);
 		return;
 	}
+
+	/* Invalidate the cache when the camera has moved more than 1 block
+	   horizontally so that stale reflection rays from the old position
+	   aren't rendered at the wrong world coordinates. */
+	if(wr.cache && (fabsf(camera_x - wr.last_cam_x) > 1.0F || fabsf(camera_z - wr.last_cam_z) > 1.0F)) {
+		memset(wr.cache, 0, (size_t)wr.size_x * wr.size_z * sizeof(uint32_t));
+		wr.cursor = 0;
+	}
+	wr.last_cam_x = camera_x;
+	wr.last_cam_z = camera_z;
 
 	if(!wr.thread_started) {
 		if(pthread_create(&wr.thread, NULL, water_worker, NULL) != 0) {

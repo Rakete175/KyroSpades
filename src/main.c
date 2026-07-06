@@ -1405,32 +1405,46 @@ int main(int argc, char** argv) {
 
                  display();
  
-                   static bool replay_save_key_pressed = false;
-                   if (window_key_down(WINDOW_KEY_REPLAY_SAVE)) {
-                           if (!replay_save_key_pressed) {
-                                   if(recorder_save_replay())
-                                           recorder_trigger_replay_flash();
-                                   replay_save_key_pressed = true;
-                           }
-                   } else {
-                           replay_save_key_pressed = false;
-                   }
+                  static bool replay_save_key_pressed = false;
+                    if (window_key_down(WINDOW_KEY_REPLAY_SAVE)) {
+                            if (!replay_save_key_pressed) {
+                                    if(recorder_save_replay()) {
+                                            recorder_trigger_replay_flash();
+                                    } else {
+                                            recorder_trigger_error_flash();
+                                    }
+                                    replay_save_key_pressed = true;
+                            }
+                    } else {
+                            replay_save_key_pressed = false;
+                    }
 
  
                  recorder_capture_frame();
  
 #ifndef OPENGL_ES
-                 if(recorder_is_flashing()) {
-                         glColor4f(0.0F, 1.0F, 0.0F, 0.5F);
-                         glLineWidth(5.0F);
-                         glBegin(GL_LINE_LOOP);
-                         glVertex2f(0.0F, 0.0F);
-                         glVertex2f((float)settings.window_width, 0.0F);
-                         glVertex2f((float)settings.window_width, (float)settings.window_height);
-                         glVertex2f(0.0F, (float)settings.window_height);
-                         glEnd();
-                         glLineWidth(1.0F);
-                 }
+                if(recorder_is_flashing()) {
+                        glColor4f(0.0F, 1.0F, 0.0F, 0.5F);
+                        glLineWidth(5.0F);
+                        glBegin(GL_LINE_LOOP);
+                        glVertex2f(0.0F, 0.0F);
+                        glVertex2f((float)settings.window_width, 0.0F);
+                        glVertex2f((float)settings.window_width, (float)settings.window_height);
+                        glVertex2f(0.0F, (float)settings.window_height);
+                        glEnd();
+                        glLineWidth(1.0F);
+                }
+                if(recorder_is_error_flashing()) {
+                        glColor4f(1.0F, 0.3F, 0.0F, 0.5F);
+                        glLineWidth(5.0F);
+                        glBegin(GL_LINE_LOOP);
+                        glVertex2f(0.0F, 0.0F);
+                        glVertex2f((float)settings.window_width, 0.0F);
+                        glVertex2f((float)settings.window_width, (float)settings.window_height);
+                        glVertex2f(0.0F, (float)settings.window_height);
+                        glEnd();
+                        glLineWidth(1.0F);
+                }
  
                  if(recorder_is_recording_active()) {
                          float blink = sin(window_time() * 3.0F) * 0.5F + 0.5F;
