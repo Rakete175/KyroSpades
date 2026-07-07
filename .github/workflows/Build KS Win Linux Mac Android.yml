@@ -12,7 +12,7 @@ jobs:
         include:
           - os: windows-latest
             platform: windows
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             platform: linux
           - os: macos-15-intel
             platform: macos
@@ -102,7 +102,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential libglfw3-dev libglew-dev libopenal-dev libenet-dev libdeflate-dev libpulse-dev zip libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
+          sudo apt-get install -y cmake build-essential libglfw3-dev libglew-dev libopenal-dev libenet-dev libdeflate-dev libpulse-dev zip libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev patchelf
 
       - name: Build (Linux)
         if: matrix.platform == 'linux'
@@ -111,6 +111,23 @@ jobs:
           cd build
           cmake -DCMAKE_BUILD_TYPE=Release ..
           make -j$(nproc)
+
+      - name: Bundle shared libraries (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          cd build/KyroSpades
+          set -e
+          for lib in $(ldd client | grep '=> /' | awk '{print $3}'); do
+            case "$lib" in
+              */ld-linux*|*/libc.so.*|*/libm.so.*|*/libpthread.so.*|*/libdl.so.*|*/librt.so.*|*/libresolv.so.*|*/libutil.so.*|*/libnss_*|*/libstdc++.so.*|*/libgcc_s.so.*|*linux-vdso*)
+                ;;
+              *)
+                echo "Bundling: $lib"
+                cp -n "$lib" .
+                ;;
+            esac
+          done
+          patchelf --set-rpath '$ORIGIN' client
 
       - name: Zip release (Linux)
         if: matrix.platform == 'linux'
@@ -128,7 +145,7 @@ jobs:
 
       - name: Install build tools (macOS)
         if: matrix.platform == 'macos'
-        run: brew install cmake pkg-config ffmpeg
+        run: brew install cmake pkg-config ffmpeg dylibbundler
 
       - name: Build dependencies from source (macOS)
         if: matrix.platform == 'macos'
@@ -198,6 +215,12 @@ jobs:
                 -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
                 ..
           make -j$(sysctl -n hw.logicalcpu)
+
+      - name: Bundle shared libraries (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          cd build/KyroSpades
+          dylibbundler -b -x client -d . -p @loader_path/
 
       - name: Verify macOS binary arch + min OS (macOS)
         if: matrix.platform == 'macos'
