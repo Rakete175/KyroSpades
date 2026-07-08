@@ -122,6 +122,23 @@ jobs:
             path=$(ldd client | awk -v l="lib$lib" '$1 ~ l {print $3}')
             [ -n "$path" ] && cp -n "$path" lib/
           done
+          changed=1
+          while [ "$changed" = "1" ]; do
+            changed=0
+            for f in lib/*.so*; do
+              [ ! -f "$f" ] && continue
+              for dep in $(ldd "$f" 2>/dev/null | grep '=> /' | awk '{print $3}'); do
+                case "$dep" in
+                  */ld-linux*|*/libc.so.*|*/libm.so.*|*/libpthread.so.*|*/libdl.so.*|*/librt.so.*|*/libstdc++.so.*|*/libgcc_s.so.*|*/libresolv*|*/libnss_*|*/libutil*|*/libz.so.*|*/libexpat*)
+                    ;;
+                  *)
+                    base=$(basename "$dep")
+                    [ ! -f "lib/$base" ] && { cp -n "$dep" lib/; changed=1; }
+                    ;;
+                esac
+              done
+            done
+          done
           patchelf --set-rpath '$ORIGIN/lib' client
 
       - name: Zip release (Linux)
@@ -221,9 +238,34 @@ jobs:
             path=$(otool -L client | awk -v l="lib$lib" '$1 ~ l {print $1}')
             [ -n "$path" ] && cp -n "$path" lib/
           done
-          for lib in avcodec avformat avutil swresample swscale; do
-            path=$(otool -L client | awk -v l="lib$lib" '$1 ~ l {print $1}')
-            [ -n "$path" ] && install_name_tool -change "$path" "@loader_path/lib/$(basename "$path")" client
+          changed=1
+          while [ "$changed" = "1" ]; do
+            changed=0
+            for f in lib/*.dylib; do
+              [ ! -f "$f" ] && continue
+              for dep in $(otool -L "$f" 2>/dev/null | tail -n +2 | awk '{print $1}'); do
+                case "$dep" in
+                  /usr/lib/*|/System/*|@loader_path/*|@rpath/*) ;;
+                  *)
+                    base=$(basename "$dep")
+                    [ ! -f "lib/$base" ] && [ -f "$dep" ] && { cp -n "$dep" lib/; changed=1; }
+                    ;;
+                esac
+              done
+            done
+          done
+          for f in lib/*.dylib; do
+            name=$(basename "$f")
+            install_name_tool -id "@loader_path/lib/$name" "$f" 2>/dev/null || true
+            for dep in $(otool -L "$f" 2>/dev/null | tail -n +2 | awk '{print $1}'); do
+              case "$dep" in
+                /usr/lib/*|/System/*|@loader_path/*|@rpath/*) ;;
+                *)
+                  dylib=$(basename "$dep")
+                  [ -f "lib/$dylib" ] && install_name_tool -change "$dep" "@loader_path/lib/$dylib" "$f"
+                  ;;
+              esac
+            done
           done
 
       - name: Verify macOS binary arch + min OS (macOS)
