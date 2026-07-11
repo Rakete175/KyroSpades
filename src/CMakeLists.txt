@@ -446,7 +446,6 @@ if(NOT ANDROID)
                 TARGET ${KS_TARGET}
                 POST_BUILD
                 COMMENT "Extracting additional third-party assets..."
-                DEPENDS ${KyroSpades_SOURCE_DIR}/bsresources.zip
                 WORKING_DIRECTORY ${KyroSpades_SOURCE_DIR}/build/KyroSpades
                 COMMAND ${CMAKE_COMMAND} -E tar xzf ${KyroSpades_SOURCE_DIR}/bsresources.zip
         )
@@ -458,18 +457,10 @@ if(NOT ANDROID)
                 COMMAND ${CMAKE_COMMAND} -E copy_directory ${KyroSpades_SOURCE_DIR}/resources.override ${KyroSpades_SOURCE_DIR}/build/KyroSpades
         )
 
-        # ── Post-build: bundle FFmpeg + audio shared libraries for a portable build ──
-        # Copies all FFmpeg/Audio .so/.dylib/.dll files into lib/ (or next to the .exe
-        # on Windows) so the game runs without requiring FFmpeg to be installed on the
-        # target machine. The rpath set above ($ORIGIN/lib on Linux, @loader_path/lib
-        # on macOS) makes the dynamic linker find them automatically.
-        # If the script is missing, skip gracefully — the build still works.
-        add_custom_command(
-                TARGET ${KS_TARGET}
-                POST_BUILD
-                COMMENT "Bundling shared libraries (FFmpeg, OpenAL, PulseAudio) for portable build..."
-                COMMAND bash -c "if [ -f ${KyroSpades_SOURCE_DIR}/cmake/bundle_libraries.sh ]; then bash ${KyroSpades_SOURCE_DIR}/cmake/bundle_libraries.sh $<TARGET_FILE:${KS_TARGET}>; else echo 'NOTE: bundle_libraries.sh not found — skipping lib bundling'; fi"
-        )
+        # NOTE: Library bundling (FFmpeg/OpenAL .so/.dylib/.dll) is handled by the
+        # CI workflows' "Bundle shared libraries" / "Bundle DLLs" steps, not here.
+        # Local builds use system libraries (user installs FFmpeg dev packages).
+        # The cmake/bundle_libraries.sh script is available for manual portable builds.
 
         install(
                 TARGETS ${KS_TARGET}
