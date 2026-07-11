@@ -289,9 +289,9 @@ int* camera_terrain_pickEx(unsigned char mode, float gx0, float gy0, float gz0, 
 		if(gx == gx1idx && gy == gy1idx && gz == gz1idx)
 			break;
 
-		int xr = abs(errx);
-		int yr = abs(erry);
-		int zr = abs(errz);
+		int xr = (int)fabsf(errx);
+		int yr = (int)fabsf(erry);
+		int zr = (int)fabsf(errz);
 
 		if(sx != 0 && (sy == 0 || xr < yr) && (sz == 0 || xr < zr)) {
 			gx += sx;

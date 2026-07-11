@@ -301,6 +301,9 @@ void water_reflection_pass(void) {
 	if(!water_shader_active())
 		return;
 
+	wr.last_cam_x = camera_x;
+	wr.last_cam_z = camera_z;
+
 	if(pthread_mutex_trylock(&water_lock) != 0)
 		return;
 
@@ -316,8 +319,6 @@ void water_reflection_pass(void) {
 		memset(wr.cache, 0, (size_t)wr.size_x * wr.size_z * sizeof(uint32_t));
 		wr.cursor = 0;
 	}
-	wr.last_cam_x = camera_x;
-	wr.last_cam_z = camera_z;
 
 	if(!wr.thread_started) {
 		if(pthread_create(&wr.thread, NULL, water_worker, NULL) != 0) {
@@ -340,6 +341,51 @@ void water_reflection_pass(void) {
 	pthread_mutex_unlock(&water_lock);
 }
 
+static void water_render_tile(int tx, int tz, int x0, int x1, int z0, int z1,
+                               float rd, float y, size_t* n) {
+	int za = max(tz, z0);
+	int zb = min(tz + WATER_TILE, z1);
+
+	for(int z = za; z < zb; z++) {
+		float dz = z + 0.5F - camera_z;
+		float w2 = rd * rd - dz * dz;
+		if(w2 < 0.0F)
+			continue;
+		int hw = (int)sqrtf(w2) + 1;
+
+		int xa = max(max(tx, x0), (int)camera_x - hw);
+		int xb = min(min(tx + WATER_TILE, x1), (int)camera_x + hw + 1);
+
+		uint32_t* row = wr.cache + (size_t)water_wrap(z, wr.size_z) * wr.size_x;
+
+		for(int x = xa; x < xb; x++) {
+			uint32_t c = row[water_wrap(x, wr.size_x)];
+			if(!(c >> 24))
+				continue;
+
+			tesselator_set_color(&wr.tess, c);
+                        if(settings.water_waves) {
+                                float t = wr.job.time;
+                                #define WAVE3(vx, vz) \
+                                    (sinf(t * 0.9F + (float)(vx) * 0.7F + (float)(vz) * 0.5F) * 0.08F \
+                                   + sinf(t * 1.3F + (float)(vx) * 0.4F + (float)(vz) * 1.1F) * 0.06F \
+                                   + sinf(t * 1.8F + (float)(vx) * 1.5F + (float)(vz) * 0.2F) * 0.04F)
+                                float y0 = y + WAVE3(x    , z    );
+                                float y1 = y + WAVE3(x    , z + 1);
+                                float y2 = y + WAVE3(x + 1, z + 1);
+                                float y3 = y + WAVE3(x + 1, z    );
+                                #undef WAVE3
+				tesselator_addf_simple(&wr.tess,
+					(float[]){x, y0, z, x, y1, z + 1.0F, x + 1.0F, y2, z + 1.0F, x + 1.0F, y3, z});
+			} else {
+				tesselator_addf_simple(&wr.tess,
+					(float[]){x, y, z, x, y, z + 1.0F, x + 1.0F, y, z + 1.0F, x + 1.0F, y, z});
+			}
+			(*n)++;
+		}
+	}
+}
+
 void water_render(void) {
 	if(!water_shader_active() || !wr.cache || !wr.gl_init)
 		return;
@@ -357,39 +403,10 @@ void water_render(void) {
 	tesselator_clear(&wr.tess);
 	size_t n = 0;
 
-	for(int tz = z0 & ~(WATER_TILE - 1); tz < z1; tz += WATER_TILE) {
-		for(int tx = x0 & ~(WATER_TILE - 1); tx < x1; tx += WATER_TILE) {
-			if(!camera_CubeInFrustum(tx + WATER_TILE / 2, 0.0F, tz + WATER_TILE / 2, WATER_TILE / 2, 2.0F))
-				continue;
-
-			int za = max(tz, z0);
-			int zb = min(tz + WATER_TILE, z1);
-
-			for(int z = za; z < zb; z++) {
-				float dz = z + 0.5F - camera_z;
-				float w2 = rd * rd - dz * dz;
-				if(w2 < 0.0F)
-					continue;
-				int hw = (int)sqrtf(w2) + 1;
-
-				int xa = max(max(tx, x0), (int)camera_x - hw);
-				int xb = min(min(tx + WATER_TILE, x1), (int)camera_x + hw + 1);
-
-				uint32_t* row = wr.cache + (size_t)water_wrap(z, wr.size_z) * wr.size_x;
-
-				for(int x = xa; x < xb; x++) {
-					uint32_t c = row[water_wrap(x, wr.size_x)];
-					if(!(c >> 24))
-						continue;
-
-					tesselator_set_color(&wr.tess, c);
-					tesselator_addf_simple(&wr.tess,
-										   (float[]) {x, y, z, x, y, z + 1.0F, x + 1.0F, y, z + 1.0F, x + 1.0F, y, z});
-					n++;
-				}
-			}
-		}
-	}
+	for(int tz = z0 & ~(WATER_TILE - 1); tz < z1; tz += WATER_TILE)
+		for(int tx = x0 & ~(WATER_TILE - 1); tx < x1; tx += WATER_TILE)
+			if(camera_CubeInFrustum(tx + WATER_TILE / 2, 0.0F, tz + WATER_TILE / 2, WATER_TILE / 2, 2.0F))
+				water_render_tile(tx, tz, x0, x1, z0, z1, rd, y, &n);
 
 	if(!n)
 		return;

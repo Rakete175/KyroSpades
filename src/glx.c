@@ -646,6 +646,86 @@ void glx_draw_quad_2d(float x, float y, float w, float h) {
 #endif
 }
 
+/* Vertical gradient quad — needed because GLES has no glBegin/glVertex2f
+ * (immediate mode never existed in any GLES spec, ES 1.1 included), so a
+ * plain glBegin(GL_QUADS) two-color quad has to become a 4-vertex
+ * GL_TRIANGLE_STRIP with per-vertex color everywhere but classic desktop GL. */
+void glx_draw_gradient_quad_2d(float x, float y, float w, float h, float r1, float g1, float b1, float r2, float g2,
+								float b2) {
+#if defined(OPENGL_ES)
+	/* Strip order top-left, bottom-left, top-right, bottom-right. */
+	float pos[] = {
+		x,     y,     0.0f,
+		x,     y - h, 0.0f,
+		x + w, y,     0.0f,
+		x + w, y - h, 0.0f,
+	};
+	unsigned char col[] = {
+		(unsigned char)(r1 * 255.0f), (unsigned char)(g1 * 255.0f), (unsigned char)(b1 * 255.0f), 255,
+		(unsigned char)(r2 * 255.0f), (unsigned char)(g2 * 255.0f), (unsigned char)(b2 * 255.0f), 255,
+		(unsigned char)(r1 * 255.0f), (unsigned char)(g1 * 255.0f), (unsigned char)(b1 * 255.0f), 255,
+		(unsigned char)(r2 * 255.0f), (unsigned char)(g2 * 255.0f), (unsigned char)(b2 * 255.0f), 255,
+	};
+
+	if(gles_version >= 2 && default_shader) {
+		unsigned char buf[4 * (3 * sizeof(float) + 4)];
+		size_t voff = 4 * 3 * sizeof(float);
+		memcpy(buf, pos, voff);
+		memcpy(buf + voff, col, sizeof(col));
+
+		glx_ensure_line_quad_vbo();
+		glBindBuffer(GL_ARRAY_BUFFER, line_quad_vbo);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(buf), buf, GL_STREAM_DRAW);
+
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 0, (void*)voff);
+		glEnableVertexAttribArray(1);
+
+		GLint cur_prog;
+		glGetIntegerv(GL_CURRENT_PROGRAM, &cur_prog);
+		if(cur_prog == (GLint)default_shader) {
+			glUniform1f(loc_u_HasVertexColor, 1.0F);
+			glUniform1f(loc_u_TextureEnabled, 0.0F);
+		}
+
+		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+		glDisableVertexAttribArray(0);
+		glDisableVertexAttribArray(1);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+		if(cur_prog == (GLint)default_shader)
+			glUniform1f(loc_u_HasVertexColor, 0.0F);
+		return;
+	}
+
+	/* ES 1.1 fixed-function fallback */
+	float posf[] = {x, y, x, y - h, x + w, y, x + w, y - h};
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glDisable(GL_TEXTURE_2D);
+	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+	glDisableClientState(GL_NORMAL_ARRAY);
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glEnableClientState(GL_COLOR_ARRAY);
+	glVertexPointer(2, GL_FLOAT, 0, posf);
+	glColorPointer(4, GL_UNSIGNED_BYTE, 0, col);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	glDisableClientState(GL_VERTEX_ARRAY);
+	glDisableClientState(GL_COLOR_ARRAY);
+	glEnable(GL_TEXTURE_2D);
+#else
+	glBegin(GL_QUADS);
+	glColor3f(r1, g1, b1);
+	glVertex2f(x, y);
+	glVertex2f(x + w, y);
+	glColor3f(r2, g2, b2);
+	glVertex2f(x + w, y - h);
+	glVertex2f(x, y - h);
+	glEnd();
+#endif
+}
+
 /* ── Spherical fog ───────────────────────────────────────────────────────── */
 
 void glx_enable_sphericalfog() {

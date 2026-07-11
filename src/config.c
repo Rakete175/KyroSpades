@@ -297,6 +297,11 @@ void config_save() {
         config_seti("client", "smooth_fog", settings.smooth_fog);
         config_seti("client", "water_shader", settings.water_shader);
         config_seti("client", "ambient_occlusion", settings.ambient_occlusion);
+        config_seti("client", "shadow_quality", settings.shadow_quality);
+        config_setf("client", "shadow_intensity", settings.shadow_intensity);
+        config_seti("client", "sky_gradient", settings.sky_gradient);
+        config_setf("client", "sky_gradient_intensity", settings.sky_gradient_intensity);
+        config_seti("client", "water_waves", settings.water_waves);
         config_setf("client", "camera_fov", settings.camera_fov);
         config_seti("client", "hold_down_sights", settings.hold_down_sights);
         config_setf("client", "chat_shadow", settings.chat_shadow);
@@ -319,6 +324,8 @@ void config_save() {
         config_setf("client", "saturation", settings.saturation);
         config_setf("client", "contrast", settings.contrast);
         config_setf("client", "vignette", settings.vignette);
+        config_seti("client", "volumetric_light", settings.volumetric_light);
+        config_setf("client", "volumetric_light_strength", settings.volumetric_light_strength);
         config_seti("client", "show_live_player_count", settings.show_live_player_count);
         config_seti("client", "ads_zoom_animation", settings.ads_zoom_animation);
         config_seti("client", "auto_demo_recording", settings.auto_demo_recording);
@@ -445,10 +452,18 @@ static int config_read_key(void* user, const char* section, const char* name, co
                 IMPORT_SETTING(settings.ui_spacing, ui_spacing, atoi(value));
                 IMPORT_SETTING(settings.ui_padding, ui_padding, atoi(value));
                 IMPORT_SETTING(settings.ao_multiplier, ao_multiplier, fmaxf(0.0F, atof(value)));
+                IMPORT_SETTING(settings.shadow_quality, shadow_quality, atoi(value));
+                IMPORT_SETTING(settings.shadow_intensity, shadow_intensity, fmaxf(0.0F, fminf(1.0F, atof(value))));
+                IMPORT_SETTING(settings.sky_gradient, sky_gradient, atoi(value));
+                IMPORT_SETTING(settings.sky_gradient_intensity, sky_gradient_intensity, fmaxf(0.0F, fminf(1.0F, atof(value))));
+                IMPORT_SETTING(settings.water_waves, water_waves, atoi(value));
                 IMPORT_SETTING(settings.exposure, exposure, fmaxf(-100.0F, fminf(100.0F, atof(value))));
                 IMPORT_SETTING(settings.saturation, saturation, fmaxf(-100.0F, fminf(100.0F, atof(value))));
                 IMPORT_SETTING(settings.contrast, contrast, fmaxf(-100.0F, fminf(100.0F, atof(value))));
                 IMPORT_SETTING(settings.vignette, vignette, fmaxf(0.0F, fminf(100.0F, atof(value))));
+                IMPORT_SETTING(settings.volumetric_light, volumetric_light, atoi(value));
+                IMPORT_SETTING(settings.volumetric_light_strength, volumetric_light_strength,
+                               fmaxf(0.0F, fminf(1.0F, atof(value))));
                 IMPORT_SETTING(settings.show_live_player_count, show_live_player_count, atoi(value));
                 IMPORT_SETTING(settings.ads_zoom_animation, ads_zoom_animation, atoi(value));
                 IMPORT_SETTING(settings.auto_demo_recording, auto_demo_recording, atoi(value));
@@ -978,13 +993,13 @@ void config_reload() {
                                  .type = CONFIG_TYPE_INT,
                                  .min = 0,
                                  .max = 1,
-                                 .help = "Reflective water surface",
-                                 .name = "Water shader",
-                                 .category = "Graphic Settings",
-                         });
-        list_add(&config_settings,
-                         &(struct config_setting) {
-                                 .value = &settings_tmp.ambient_occlusion,
+                                  .help = "Reflective water surface",
+                                  .name = "Water shader",
+                                  .category = "Visual Effects",
+                          });
+         list_add(&config_settings,
+                          &(struct config_setting) {
+                                  .value = &settings_tmp.ambient_occlusion,
                                  .type = CONFIG_TYPE_INT,
                                  .min = 0,
                                  .max = 1,
@@ -1001,6 +1016,76 @@ void config_reload() {
                                  .help = "Multiplier for ambient occlusion strength",
                                  .name = "AO multiplier",
                                  .category = "Graphic Settings",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.shadow_quality,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                  .help = "Realistic directional shadows from blocks",
+                                  .name = "Realistic shadows",
+                                  .category = "Visual Effects",
+                          });
+         list_add(&config_settings,
+                          &(struct config_setting) {
+                                  .value = &settings_tmp.shadow_intensity,
+                                  .type = CONFIG_TYPE_FLOAT,
+                                  .min = 0,
+                                  .max = 1,
+                                  .help = "How dark sun shadows are",
+                                  .name = "Shadow intensity",
+                                  .category = "Visual Effects",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.sky_gradient,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Blended sky gradient instead of flat color",
+                                 .name = "Sky gradient",
+                                 .category = "Visual Effects",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.sky_gradient_intensity,
+                                 .type = CONFIG_TYPE_FLOAT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Intensity of the sky gradient effect",
+                                 .name = "Sky gradient intensity",
+                                 .category = "Visual Effects",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.water_waves,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Animated waves on the water surface",
+                                 .name = "Water waves",
+                                 .category = "Visual Effects",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.volumetric_light,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Enable volumetric light scattering (a.k.a. Godrays)",
+                                 .name = "Volumetric light",
+                                 .category = "Visual Effects",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.volumetric_light_strength,
+                                 .type = CONFIG_TYPE_FLOAT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Strength of volumetric light (0 = off, 1 = strongest)",
+                                 .name = "Volumetric light strength",
+                                 .category = "Visual Effects",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -1440,61 +1525,61 @@ void config_reload() {
                                  .max = 60,
                                  .name = "Recording FPS",
                                  .help = "Frames per second for video recording",
-                                   .category = "Video Record/Replay",
+                                    .category = "Recording & Replay",
 
-                         });
-        list_add(&config_settings,
-                         &(struct config_setting) {
-                                 .value = &settings_tmp.recording_bitrate_kbps,
+                        });
+                list_add(&config_settings,
+                                 &(struct config_setting) {
+                                         .value = &settings_tmp.recording_bitrate_kbps,
                                  .type = CONFIG_TYPE_INT,
                                  .min = 500,
                                  .max = 50000,
                                  .name = "Recording bitrate (kbps)",
                                   .help = "Video bitrate in kilobits per second. Higher = better quality, larger file",
-                                    .category = "Video Record/Replay",
+                                    .category = "Recording & Replay",
 
-                                  });
-		list_add(&config_settings,
-		         &(struct config_setting) {
-		                 .value = &settings_tmp.replay_enabled,
-		                 .type = CONFIG_TYPE_INT,
-		                 .min = 0,
-		                 .max = 1,
-		                 .name = "Replay Enabled",
-		                 .help = "Continuously record segments for replay",
-                                   .category = "Video Record/Replay",
+                        });
+                list_add(&config_settings,
+                                 &(struct config_setting) {
+                                         .value = &settings_tmp.replay_enabled,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .name = "Replay Enabled",
+                                 .help = "Continuously record segments for replay",
+                                   .category = "Recording & Replay",
 
-		         });
-		list_add(&config_settings,
-		         &(struct config_setting) {
-		                 .value = &settings_tmp.replay_duration,
-		                 .type = CONFIG_TYPE_INT,
-		                 .min = 1,
-		                 .max = 300,
-		                 .name = "Replay Duration (s)",
-		                 .help = "Number of seconds of buffer to keep",
-                                   .category = "Video Record/Replay",
+                         });
+                list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.replay_duration,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 1,
+                                 .max = 300,
+                                 .name = "Replay Duration (s)",
+                                 .help = "Number of seconds of buffer to keep",
+                                   .category = "Recording & Replay",
 
-		         });
-		list_add(&config_settings,
-		         &(struct config_setting) {
-		                 .value = &settings_tmp.replay_save_hotkey,
-		                 .type = CONFIG_TYPE_INT,
-		                 .min = 0,
-		                 .max = INT_MAX,
-		                 .name = "Replay Save Hotkey",
-		                 .help = "Hotkey to save the current replay buffer",
-                                   .category = "Video Record/Replay",
+                         });
+                list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.replay_save_hotkey,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = INT_MAX,
+                                 .name = "Replay Save Hotkey",
+                                 .help = "Hotkey to save the current replay buffer",
+                                   .category = "Recording & Replay",
 
-		         });
-		list_add(&config_settings,
-		         &(struct config_setting) {
-		                 .value = settings_tmp.audio_monitor_source,
-		                 .type = CONFIG_TYPE_STRING,
-		                 .max = sizeof(settings.audio_monitor_source) - 1,
-		                 .name = "Audio Monitor Source",
-		                 .help = "PulseAudio monitor source for system audio capture",
-		                 .category = "Video Record/Replay",
-		         });
+                         });
+                list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = settings_tmp.audio_monitor_source,
+                                 .type = CONFIG_TYPE_STRING,
+                                 .max = sizeof(settings.audio_monitor_source) - 1,
+                                 .name = "Audio Monitor Source",
+                                 .help = "PulseAudio monitor source for system audio capture",
+                                 .category = "Video Record/Replay",
+                         });
 
 }

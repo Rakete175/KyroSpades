@@ -30,6 +30,7 @@ extern int map_size_y;
 extern int map_size_z;
 
 extern float fog_color[4];
+extern float sun_dir[3];
 
 struct Point {
 	int x, y, z;
@@ -62,5 +63,6 @@ int map_height_at(int x, int z);
 void map_save_file(const char* filename);
 void map_copy_blocks(struct libvxl_chunk_copy* copy, size_t x, size_t y);
 int map_total_blocks(void);
+float map_sun_shadow(int x, int y, int z, int steps);
 
 #endif

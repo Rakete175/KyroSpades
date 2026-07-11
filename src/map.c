@@ -50,6 +50,7 @@ static pthread_rwlock_t map_lock;
 static int total_blocks_cache = -1;
 
 float fog_color[4] = {0.5F, 0.9098F, 1.0F, 1.0F};
+float sun_dir[3] = {-0.5F, 0.8F, -0.3F};
 
 struct damaged_voxel {
 	int damage;
@@ -752,4 +753,51 @@ int map_total_blocks(void) {
 
 	total_blocks_cache = total;
 	return total;
+}
+
+float map_sun_shadow(int x, int y, int z, int steps) {
+	float ox = x + 0.5F + sun_dir[0] * 0.1F;
+	float oy = y + 0.5F + sun_dir[1] * 0.1F;
+	float oz = z + 0.5F + sun_dir[2] * 0.1F;
+
+	int gx = (int)floorf(ox);
+	int gy = (int)floorf(oy);
+	int gz = (int)floorf(oz);
+
+	int step_x = sun_dir[0] > 0.0F ? 1 : -1;
+	int step_y = sun_dir[1] > 0.0F ? 1 : -1;
+	int step_z = sun_dir[2] > 0.0F ? 1 : -1;
+
+	float tdelta_x = sun_dir[0] != 0.0F ? fabsf(1.0F / sun_dir[0]) : 1e30F;
+	float tdelta_y = sun_dir[1] != 0.0F ? fabsf(1.0F / sun_dir[1]) : 1e30F;
+	float tdelta_z = sun_dir[2] != 0.0F ? fabsf(1.0F / sun_dir[2]) : 1e30F;
+
+	float tmax_x = sun_dir[0] > 0.0F ? ((gx + 1) - ox) * tdelta_x : (ox - gx) * tdelta_x;
+	float tmax_y = sun_dir[1] > 0.0F ? ((gy + 1) - oy) * tdelta_y : (oy - gy) * tdelta_y;
+	float tmax_z = sun_dir[2] > 0.0F ? ((gz + 1) - oz) * tdelta_z : (oz - gz) * tdelta_z;
+
+	for(int i = 0; i < steps; i++) {
+		if(tmax_x < tmax_y && tmax_x < tmax_z) {
+			gx += step_x;
+			tmax_x += tdelta_x;
+		} else if(tmax_y < tmax_z) {
+			gy += step_y;
+			tmax_y += tdelta_y;
+		} else {
+			gz += step_z;
+			tmax_z += tdelta_z;
+		}
+
+		if(gy >= map_size_y)
+			return 1.0F;
+		if(gy < 0)
+			return 1.0F;
+		if(gx < 0 || gx >= map_size_x || gz < 0 || gz >= map_size_z)
+			return 1.0F;
+
+		if(!map_isair_nolock(gx, gy, gz))
+			return 0.0F;
+	}
+
+	return 1.0F;
 }

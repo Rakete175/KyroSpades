@@ -4667,13 +4667,16 @@ static int setting_in_category(struct config_setting* a, int cat) {
                                 && strcmp(a->category, "Spectator Mode Settings") != 0
                                 && strcmp(a->category, "Graphic Settings") != 0
                                 && strcmp(a->category, "HUD/UI Settings") != 0
-                                && strcmp(a->category, "Chat Settings") != 0;
+                                && strcmp(a->category, "Chat Settings") != 0
+                                && strcmp(a->category, "Recording & Replay") != 0
+                                && strcmp(a->category, "Visual Effects") != 0;
                 case 1: return strcmp(a->category, "Weapon Settings") == 0;
                 case 2: return strcmp(a->category, "Weather") == 0;
                 case 3: return strcmp(a->category, "Spectator Mode Settings") == 0;
                 case 4: return strcmp(a->category, "Graphic Settings") == 0;
                 case 5: return strcmp(a->category, "HUD/UI Settings") == 0;
                 case 6: return strcmp(a->category, "Chat Settings") == 0;
+                case 7: return strcmp(a->category, "Visual Effects") == 0;
                 default: return 0;
         }
 }
@@ -4704,6 +4707,7 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
                         "Graphics",
                         "HUD/UI",
                         "Chat",
+                        "Visual Effects",
                 };
                 int cat_count = sizeof(cat_names) / sizeof(cat_names[0]);
 
@@ -4731,7 +4735,12 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
                 int width = mu_get_current_container(ctx)->body.w;
                 for(int k = 0; k < list_size(&config_settings); k++) {
                         struct config_setting* a = list_get(&config_settings, k);
-                        if(setting_in_category(a, selected_category))
+                        if(setting_in_category(a, selected_category)
+                           && strcmp(a->name, "Recording FPS") != 0
+                           && strcmp(a->name, "Recording bitrate (kbps)") != 0
+                           && strcmp(a->name, "Replay Enabled") != 0
+                           && strcmp(a->name, "Replay Duration (s)") != 0
+                           && strcmp(a->name, "Replay Save Hotkey") != 0)
                                 render_setting_row(ctx, a, width);
                 }
 
@@ -4746,7 +4755,9 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
                 int remesh = settings.textured_blocks != settings_tmp.textured_blocks
                         || settings.ambient_occlusion != settings_tmp.ambient_occlusion
                         || settings.greedy_meshing != settings_tmp.greedy_meshing
-                        || settings.ao_multiplier != settings_tmp.ao_multiplier;
+                        || settings.ao_multiplier != settings_tmp.ao_multiplier
+                        || settings.shadow_quality != settings_tmp.shadow_quality
+                        || settings.shadow_intensity != settings_tmp.shadow_intensity;
                 memcpy(&settings, &settings_tmp, sizeof(struct RENDER_OPTIONS));
                 window_fromsettings();
                 sound_volume(settings.volume / 10.0F);

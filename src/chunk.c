@@ -617,6 +617,9 @@ void chunk_generate_naive(struct libvxl_chunk_copy* blocks, struct tesselator* t
 	ao_curve[3] = powf(0.75F, ao_mult);
 	ao_curve[4] = 1.0F;
 
+	if(settings.shadow_quality)
+		map_read_lock();
+
 	for(size_t k = 0; k < blocks->blocks_sorted_count; k++) {
 		struct libvxl_block* blk = blocks->blocks_sorted + k;
 
@@ -632,6 +635,11 @@ void chunk_generate_naive(struct libvxl_chunk_copy* blocks, struct tesselator* t
 		int b = red(col);
 
 		float shade = solid_sunblock(blocks, x, y, z);
+		if(settings.shadow_quality) {
+			float dir_shade = map_sun_shadow(x, y, z, 32);
+			float sf = (1.0F - settings.shadow_intensity) + settings.shadow_intensity * dir_shade;
+			shade *= sf;
+		}
 		r *= shade;
 		g *= shade;
 		b *= shade;
@@ -780,6 +788,9 @@ void chunk_generate_naive(struct libvxl_chunk_copy* blocks, struct tesselator* t
 			}
 		}
 	}
+
+	if(settings.shadow_quality)
+		map_read_unlock();
 }
 
 static void emit_textured_face(struct tesselator* tess, enum tesselator_cube_face face,
@@ -816,6 +827,9 @@ static void emit_textured_face(struct tesselator* tess, enum tesselator_cube_fac
 void chunk_generate_textured(struct libvxl_chunk_copy* blocks, struct tesselator* tess, int* max_height) {
         *max_height = 0;
 
+        if(settings.shadow_quality)
+                map_read_lock();
+
         for(size_t k = 0; k < blocks->blocks_sorted_count; k++) {
                 struct libvxl_block* blk = blocks->blocks_sorted + k;
 
@@ -829,6 +843,18 @@ void chunk_generate_textured(struct libvxl_chunk_copy* blocks, struct tesselator
                 int r = blue(col);
                 int g = green(col);
                 int b = red(col);
+
+                {
+                        float shade = solid_sunblock(blocks, x, y, z);
+                        if(settings.shadow_quality) {
+                                float dir_shade = map_sun_shadow(x, y, z, 32);
+                                float sf = (1.0F - settings.shadow_intensity) + settings.shadow_intensity * dir_shade;
+                                shade *= sf;
+                        }
+                        r = (int)(r * shade);
+                        g = (int)(g * shade);
+                        b = (int)(b * shade);
+                }
 
                 {
                         int tile_x = (r / 64) + ((b / 64 == 1 || b / 64 == 3) ? 4 : 0);
@@ -871,6 +897,9 @@ void chunk_generate_textured(struct libvxl_chunk_copy* blocks, struct tesselator
                         }
                 }
         }
+
+        if(settings.shadow_quality)
+                map_read_unlock();
 
         (*max_height)++;
 }

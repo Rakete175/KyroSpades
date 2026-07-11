@@ -18,11 +18,11 @@
 
 void recorder_init(void) { log_info("Recorder: disabled (no FFmpeg)"); }
 void recorder_shutdown(void) {}
-void recorder_toggle_recording(void) {}
+void recorder_toggle_recording(void) { chat_add(0, 0xFF4444, "Recording disabled — FFmpeg not available"); }
 int  recorder_is_recording_active(void) { return 0; }
 void recorder_buffer_start(void) {}
+void recorder_toggle_buffer(void) { chat_add(0, 0xFF4444, "Replay buffer disabled — FFmpeg not available"); }
 void recorder_buffer_stop(void) {}
-void recorder_toggle_buffer(void) {}
 int  recorder_is_buffer_active(void) { return 0; }
 int  recorder_save_replay(void) { return 0; }
 void recorder_trigger_replay_flash(void) {}
@@ -319,6 +319,7 @@ static void recorder_start_recording(void) {
     h = settings.window_height;
     if(w <= 0 || h <= 0) {
         log_error("Recorder: invalid window dimensions for recording (%dx%d)", w, h);
+        chat_add(0, 0xFF4444, "Recording failed: invalid window size");
         return;
     }
 
@@ -334,6 +335,7 @@ static void recorder_start_recording(void) {
 
     if(!ensure_rec_encoder(w, h)) {
         log_error("Recorder: failed to initialize video encoder (%dx%d)", w, h);
+        chat_add(0, 0xFF4444, "Recording failed: libx264 encoder not found");
         return;
     }
     log_info("Recorder: video encoder ready (%dx%d)", w, h);
@@ -346,6 +348,7 @@ static void recorder_start_recording(void) {
     rec_vbuf = calloc(rec_vcapacity, sizeof(AVPacket*));
     if(!rec_vbuf) {
         log_error("Recorder: failed to allocate video packet buffer");
+        chat_add(0, 0xFF4444, "Recording failed: out of memory");
         return;
     }
     rec_vcount = 0;
@@ -356,6 +359,7 @@ static void recorder_start_recording(void) {
     if(!rec_pcm_buf) {
         log_error("Recorder: failed to allocate PCM buffer");
         free(rec_vbuf); rec_vbuf = NULL;
+        chat_add(0, 0xFF4444, "Recording failed: out of memory");
         return;
     }
     rec_pcm_frames = 0;
@@ -372,6 +376,7 @@ static void recorder_start_recording(void) {
         log_error("Recorder: failed to start recording encode thread");
         rec_encode_thread_running = 0;
         rec_running = 0;
+        chat_add(0, 0xFF4444, "Recording failed: could not start encode thread");
         return;
     }
 
@@ -381,10 +386,12 @@ static void recorder_start_recording(void) {
         if(pthread_create(&audio_thread, NULL, audio_capture_thread, NULL) != 0) {
             log_warn("Recorder: failed to start audio capture thread for recording");
             audio_thread_running = 0;
+            chat_add(0, 0xFFFF44, "Audio capture unavailable");
         }
     }
 
     log_info("Recorder: started recording to %s", current_filename);
+    chat_add(0, 0x44FF44, "Recording started");
 }
 
 static void recorder_stop_recording(void) {
@@ -869,6 +876,7 @@ void recorder_buffer_start(void) {
 
     if(w <= 0 || h <= 0) {
         log_error("Recorder: invalid window dimensions for buffer (%dx%d)", w, h);
+        chat_add(0, 0xFF4444, "Replay buffer failed: invalid window size");
         return;
     }
     buf_w = w;
@@ -882,7 +890,7 @@ void recorder_buffer_start(void) {
     }
 
     const AVCodec* venc = avcodec_find_encoder_by_name("libx264");
-    if(!venc) { log_error("Recorder: libx264 encoder not found"); return; }
+    if(!venc) { log_error("Recorder: libx264 encoder not found"); chat_add(0, 0xFF4444, "Replay buffer failed: libx264 not found"); return; }
 
     venc_ctx = avcodec_alloc_context3(venc);
     if(!venc_ctx) { log_error("Recorder: failed to alloc video codec context"); return; }

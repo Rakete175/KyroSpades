@@ -68,6 +68,9 @@ void glx_displaylist_draw(struct glx_displaylist* x, int type);
 /* 2D draw helpers — ES 2.0 uses vertex attributes, desktop GL uses glBegin/glEnd */
 void glx_draw_line_2d(float x1, float y1, float x2, float y2);
 void glx_draw_quad_2d(float x, float y, float w, float h);
+/* Vertical 2-color gradient quad: top edge = (r1,g1,b1), bottom edge = (r2,g2,b2). */
+void glx_draw_gradient_quad_2d(float x, float y, float w, float h, float r1, float g1, float b1, float r2, float g2,
+								float b2);
 
 #ifdef OPENGL_ES
 void glx_draw_screen_quad(void);
