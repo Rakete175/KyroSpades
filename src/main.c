@@ -753,6 +753,13 @@ void display() {
                                 }
 #endif
 #endif
+#if defined(OPENGL_ES)
+                                /* Close the "else" branch opened by "} else {" above.
+                                   On ES builds the else block was opened but its
+                                   matching close was inside the inactive #else
+                                   branch, leaving the block unclosed. */
+                                }
+#endif
                                 if(postproc.vol2_shader) {
                                         postproc.uni_vol2_sun_dir = glGetUniformLocation(postproc.vol2_shader, "sunPositionScreen");
                                         postproc.uni_vol2_sun_brightness = glGetUniformLocation(postproc.vol2_shader, "sunBrightness");
@@ -866,6 +873,11 @@ void display() {
 #if defined(OPENGL_ES)
                                 }
 #endif
+#endif
+#if defined(OPENGL_ES)
+                                /* Close the "else" branch opened by "} else {" above.
+                                   Same fix as the vol2_shader block above. */
+                                }
 #endif
                                 if(postproc.flare_shader) {
                                         postproc.uni_flare_sun_pos = glGetUniformLocation(postproc.flare_shader, "sunPositionScreen");
