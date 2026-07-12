@@ -82,6 +82,10 @@ static struct {
         int uni_pp_scale;
         int uni_pp_bias;
         int uni_pp_vig;
+        /* New post-proc uniforms: chromatic aberration strength,
+           filmic tone-mapping flag */
+        int uni_pp_ca_strength;
+        int uni_pp_filmic;
         /* Volumetric lighting (god-rays) — faithful port of Luanti's shader */
         unsigned int vol_tex;       /* color texture that receives volumetric output */
         unsigned int vol_fbo;       /* FBO bound to vol_tex (no depth attachment) */
@@ -238,13 +242,20 @@ void drawScene() {
                 glShadeModel(GL_FLAT);
         }
 
+        /* Effective fog color for this frame (darkened 10% when filmic is on).
+           Used by every fog path below so the visible fog matches what the
+           user picked in the color picker after ACES tone mapping. */
+        float fc[4];
+        fog_color_render(fc);
+        fc[3] = fog_color[3];
+
         if(settings.textured_blocks) {
 #ifndef OPENGL_ES
                 if(glx_fog) {
                         glFogi(GL_FOG_MODE, GL_LINEAR);
                         glFogf(GL_FOG_START, 0.0F);
                         glFogf(GL_FOG_END, settings.render_distance);
-                        glFogfv(GL_FOG_COLOR, fog_color);
+                        glFogfv(GL_FOG_COLOR, fc);
                         glEnable(GL_FOG);
                 }
 #endif
@@ -269,7 +280,7 @@ void drawScene() {
                 glFogi(GL_FOG_MODE, GL_EXP2);
 #endif
                 glFogf(GL_FOG_DENSITY, 0.015F);
-                glFogfv(GL_FOG_COLOR, fog_color);
+                glFogfv(GL_FOG_COLOR, fc);
                 glEnable(GL_FOG);
         }
 
@@ -351,10 +362,15 @@ void display() {
         if(network_map_transfer) {
                 glClearColor(0.0F, 0.0F, 0.0F, 1.0F);
         } else {
-                glClearColor(fog_color[0], fog_color[1], fog_color[2], fog_color[3]);
+                float fc[3];
+                fog_color_render(fc);
+                glClearColor(fc[0], fc[1], fc[2], fog_color[3]);
         }
 
-        int needs_postproc = ((glx_version || gles_version >= 2) && (settings.exposure != 0 || settings.saturation != 0 || settings.contrast != 0 || settings.vignette != 0 || settings.volumetric_light));
+        int needs_postproc = ((glx_version || gles_version >= 2)
+                              && (settings.exposure != 0 || settings.saturation != 0 || settings.contrast != 0
+                                  || settings.vignette != 0 || settings.volumetric_light || settings.lens_flare
+                                  || settings.chromatic_aberration || settings.filmic_tonemapping));
 
         if(hud_active->render_world || network_connected) {
                 if(needs_postproc) {
@@ -470,15 +486,33 @@ void display() {
                                                 "uniform float pp_scale;\n"
                                                 "uniform float pp_bias;\n"
                                                 "uniform float pp_vig;\n"
+                                                "uniform float pp_ca_strength;\n"
+                                                "uniform float pp_filmic;\n"
                                                 "uniform sampler2D tex;\n"
+                                                "vec3 acesFilm(vec3 x){\n"
+                                                "    const float a=2.51; const float b=0.03;\n"
+                                                "    const float c=2.43; const float d=0.59; const float e=0.14;\n"
+                                                "    return clamp((x*(a*x+b))/(x*(c*x+d)+e),0.0,1.0);\n"
+                                                "}\n"
                                                 "void main(){\n"
-                                                "    vec4 c = texture2D(tex, v_TexCoord);\n"
-                                                "    float g = dot(c.rgb, vec3(0.299, 0.587, 0.114));\n"
-                                                "    c.rgb = mix(vec3(g), c.rgb, pp_sat);\n"
-                                                "    c.rgb = c.rgb * pp_scale + pp_bias;\n"
-                                                "    vec2 d = v_TexCoord - 0.5;\n"
-                                                "    c.rgb *= clamp(1.0 - pp_vig * dot(d, d), 0.0, 1.0);\n"
-                                                "    gl_FragColor = c;\n" // fixed-point target clamps on write — explicit clamp removed
+                                                "    vec2 uv = v_TexCoord;\n"
+                                                "    vec2 dd = uv - 0.5;\n"
+                                                "    float r2 = dot(dd, dd);\n"
+                                                "    vec3 c;\n"
+                                                "    if(pp_ca_strength > 0.001){\n"
+                                                "        vec2 off = dd * r2 * pp_ca_strength;\n"
+                                                "        c.r = texture2D(tex, uv + off).r;\n"
+                                                "        c.g = texture2D(tex, uv).g;\n"
+                                                "        c.b = texture2D(tex, uv - off).b;\n"
+                                                "    } else {\n"
+                                                "        c = texture2D(tex, uv).rgb;\n"
+                                                "    }\n"
+                                                "    float g = dot(c, vec3(0.299, 0.587, 0.114));\n"
+                                                "    c = mix(vec3(g), c, pp_sat);\n"
+                                                "    c = c * pp_scale + pp_bias;\n"
+                                                "    if(pp_filmic > 0.5) c = acesFilm(c);\n"
+                                                "    c *= clamp(1.0 - pp_vig * r2, 0.0, 1.0);\n"
+                                                "    gl_FragColor = vec4(c, 1.0);\n"
                                                 "}\n";
                                         postproc.shader = glx_shader(vert, frag);
                                 } else {
@@ -490,15 +524,31 @@ void display() {
                                         "uniform float pp_scale;"
                                         "uniform float pp_bias;"
                                         "uniform float pp_vig;"
+                                        "uniform float pp_ca_strength;"
+                                        "uniform float pp_filmic;"
                                         "uniform sampler2D tex;"
+                                        "vec3 acesFilm(vec3 x){"
+                                        "const float a=2.51;const float b=0.03;"
+                                        "const float c=2.43;const float d=0.59;const float e=0.14;"
+                                        "return clamp((x*(a*x+b))/(x*(c*x+d)+e),0.0,1.0);"
+                                        "}"
                                         "void main(){"
-                                        "vec4 c=texture2D(tex,gl_TexCoord[0].xy);"
-                                        "float g=dot(c.rgb,vec3(0.299,0.587,0.114));"
-                                        "c.rgb=mix(vec3(g),c.rgb,pp_sat);"
-                                        "c.rgb=c.rgb*pp_scale+pp_bias;"
-                                        "vec2 d=gl_TexCoord[0].xy-0.5;"
-                                        "c.rgb*=clamp(1.0-pp_vig*dot(d,d),0.0,1.0);"
-                                        "gl_FragColor=c;}";
+                                        "vec2 uv=gl_TexCoord[0].xy;"
+                                        "vec2 dd=uv-0.5;"
+                                        "float r2=dot(dd,dd);"
+                                        "vec3 c;"
+                                        "if(pp_ca_strength>0.001){"
+                                        "vec2 off=dd*r2*pp_ca_strength;"
+                                        "c.r=texture2D(tex,uv+off).r;"
+                                        "c.g=texture2D(tex,uv).g;"
+                                        "c.b=texture2D(tex,uv-off).b;"
+                                        "}else{c=texture2D(tex,uv).rgb;}"
+                                        "float g=dot(c,vec3(0.299,0.587,0.114));"
+                                        "c=mix(vec3(g),c,pp_sat);"
+                                        "c=c*pp_scale+pp_bias;"
+                                        "if(pp_filmic>0.5)c=acesFilm(c);"
+                                        "c*=clamp(1.0-pp_vig*r2,0.0,1.0);"
+                                        "gl_FragColor=vec4(c,1.0);}";
                                 postproc.shader = glx_shader(vert, frag);
 #if defined(OPENGL_ES)
                                 }
@@ -508,6 +558,8 @@ void display() {
                                         postproc.uni_pp_scale = glGetUniformLocation(postproc.shader, "pp_scale");
                                         postproc.uni_pp_bias = glGetUniformLocation(postproc.shader, "pp_bias");
                                         postproc.uni_pp_vig = glGetUniformLocation(postproc.shader, "pp_vig");
+                                        postproc.uni_pp_ca_strength = glGetUniformLocation(postproc.shader, "pp_ca_strength");
+                                        postproc.uni_pp_filmic = glGetUniformLocation(postproc.shader, "pp_filmic");
                                         // sampler binding never changes — set once here, not per frame
                                         glUseProgram(postproc.shader);
                                         glUniform1i(glGetUniformLocation(postproc.shader, "tex"), 0);
@@ -925,6 +977,55 @@ void display() {
                 camera_ExtractFrustum();
 
                 if(!network_map_transfer) {
+                        /* Sky gradient: drawn as a background BEFORE the 3D scene so
+                           terrain correctly draws on top of it. The gradient makes the
+                           upper sky darker (like real atmospheric perspective), blending
+                           from fog_color at the horizon to a darker tint at the top.
+                           Previously this was drawn AFTER the scene with GL_FLAT shade
+                           model still active, which made per-vertex colors not
+                           interpolate — the entire quad rendered as fog_color (invisible). */
+                        if(settings.sky_gradient) {
+                                glMatrixMode(GL_PROJECTION);
+                                glPushMatrix();
+                                glLoadIdentity();
+                                glOrtho(0.0, settings.window_width, 0.0, settings.window_height, -1.0, 1.0);
+                                glMatrixMode(GL_MODELVIEW);
+                                glPushMatrix();
+                                glLoadIdentity();
+
+                                glDisable(GL_DEPTH_TEST);
+                                glDepthMask(GL_FALSE);
+                                glDisable(GL_TEXTURE_2D);
+#ifndef OPENGL_ES
+                                glShadeModel(GL_SMOOTH);
+#endif
+
+                                float h = (float)settings.window_height;
+                                float w = (float)settings.window_width;
+                                float horizon = h * 0.5F;
+                                float intensity = settings.sky_gradient_intensity;
+                                /* Use the render-time fog color (darkened 10%
+                                   when filmic is on) so the sky gradient
+                                   horizon matches the actual fog color. */
+                                float fc[3];
+                                fog_color_render(fc);
+                                float zr = fc[0] + (0.18F - fc[0]) * intensity;
+                                float zg = fc[1] + (0.28F - fc[1]) * intensity;
+                                float zb = fc[2] + (0.55F - fc[2]) * intensity;
+
+                                glx_draw_gradient_quad_2d(0, h, w, h - horizon, zr, zg, zb,
+                                                           fc[0], fc[1], fc[2]);
+
+                                glDepthMask(GL_TRUE);
+                                glEnable(GL_DEPTH_TEST);
+
+                                glMatrixMode(GL_MODELVIEW);
+                                glPopMatrix();
+                                glMatrixMode(GL_PROJECTION);
+                                glPopMatrix();
+                                glMatrixMode(GL_MODELVIEW);
+                        }
+
                         water_reflection_pass();
                         glx_enable_sphericalfog();
                         drawScene();
@@ -1144,40 +1245,6 @@ void display() {
                         glx_disable_sphericalfog();
                         if(settings.smooth_fog)
                                 glDisable(GL_FOG);
-
-                        if(settings.sky_gradient && !network_map_transfer) {
-                                glMatrixMode(GL_PROJECTION);
-                                glPushMatrix();
-                                glLoadIdentity();
-                                glOrtho(0.0, settings.window_width, 0.0, settings.window_height, -1.0, 1.0);
-                                glMatrixMode(GL_MODELVIEW);
-                                glPushMatrix();
-                                glLoadIdentity();
-
-                                glDisable(GL_DEPTH_TEST);
-                                glDepthMask(GL_FALSE);
-                                glDisable(GL_TEXTURE_2D);
-
-                                float h = (float)settings.window_height;
-                                float w = (float)settings.window_width;
-                                float horizon = h * 0.5F;
-                                float intensity = settings.sky_gradient_intensity;
-                                float zr = fog_color[0] + (0.18F - fog_color[0]) * intensity;
-                                float zg = fog_color[1] + (0.28F - fog_color[1]) * intensity;
-                                float zb = fog_color[2] + (0.55F - fog_color[2]) * intensity;
-
-                                glx_draw_gradient_quad_2d(0, h, w, h - horizon, zr, zg, zb, fog_color[0],
-                                                           fog_color[1], fog_color[2]);
-
-                                glDepthMask(GL_TRUE);
-                                glEnable(GL_DEPTH_TEST);
-
-                                glMatrixMode(GL_MODELVIEW);
-                                glPopMatrix();
-                                glMatrixMode(GL_PROJECTION);
-                                glPopMatrix();
-                                glMatrixMode(GL_MODELVIEW);
-                        }
 
                         if(needs_postproc) {
                                 mat4 saved_proj2, saved_view2, saved_model2;
@@ -1401,6 +1468,9 @@ void display() {
                                         glUniform1f(postproc.uni_pp_scale, e * ct);                            // pp_scale
                                         glUniform1f(postproc.uni_pp_bias, 0.5F * (1.0F - ct));                  // pp_bias
                                         glUniform1f(postproc.uni_pp_vig, (settings.vignette / 100.0F) * 4.0F); // pp_vig
+                                        glUniform1f(postproc.uni_pp_ca_strength,
+                                                    settings.chromatic_aberration ? settings.chromatic_aberration_strength * 0.01F : 0.0F);
+                                        glUniform1f(postproc.uni_pp_filmic, settings.filmic_tonemapping ? 1.0F : 0.0F);
 
 #if defined(OPENGL_ES)
                                         if(gles_version >= 2) {
@@ -1866,10 +1936,11 @@ int main(int argc, char** argv) {
         settings.color_correction = 0;
         settings.multisamples = 0;
         settings.shadow_entities = 0;
-        settings.ambient_occlusion = 0;
-        settings.shadow_quality = 0;
+        settings.ambient_occlusion = 1;
+        settings.ao_multiplier = 1.0F;
+        settings.shadow_quality = 1;
         settings.shadow_intensity = 0.40F;
-        settings.sky_gradient = 0;
+        settings.sky_gradient = 1;
         settings.sky_gradient_intensity = 0.5F;
         settings.water_waves = 0;
         settings.water_wave_intensity = 2.0F;
@@ -1912,12 +1983,18 @@ int main(int argc, char** argv) {
         settings.skin_intel = 0;
         settings.skin_tent = 0;
         settings.exposure = 5.0F;
-        settings.contrast = 5.0F;
+        settings.contrast = 13.0F;
         settings.vignette = 10.0F;
         settings.volumetric_light = 0;
         settings.volumetric_light_strength = 0.2F;
         settings.volumetric_light_brightness = 0.3F;
         settings.volumetric_light_range = 1.0F;
+        /* ── New post-proc shaders ───────────────────────────────────────────
+           Only filmic tone mapping is on by default.  Chromatic aberration is
+           available as an opt-in effect.  (Bloom has been removed entirely.) */
+        settings.chromatic_aberration = 0;
+        settings.chromatic_aberration_strength = 1.5F;
+        settings.filmic_tonemapping = 1;
         settings.chat_mention_r = 255;
         settings.chat_mention_g = 255;
         strcpy(settings.name, "DEV_CLIENT");

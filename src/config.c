@@ -333,6 +333,9 @@ void config_save() {
         config_setf("client", "volumetric_light_brightness", settings.volumetric_light_brightness);
         config_setf("client", "volumetric_light_range", settings.volumetric_light_range);
         config_seti("client", "lens_flare", settings.lens_flare);
+        config_seti("client", "chromatic_aberration", settings.chromatic_aberration);
+        config_setf("client", "chromatic_aberration_strength", settings.chromatic_aberration_strength);
+        config_seti("client", "filmic_tonemapping", settings.filmic_tonemapping);
         config_seti("client", "show_live_player_count", settings.show_live_player_count);
         config_seti("client", "ads_zoom_animation", settings.ads_zoom_animation);
         config_seti("client", "auto_demo_recording", settings.auto_demo_recording);
@@ -482,6 +485,10 @@ static int config_read_key(void* user, const char* section, const char* name, co
                 IMPORT_SETTING(settings.volumetric_light_range, volumetric_light_range,
                                fmaxf(0.1F, fminf(2.0F, atof(value))));
                 IMPORT_SETTING(settings.lens_flare, lens_flare, atoi(value));
+                IMPORT_SETTING(settings.chromatic_aberration, chromatic_aberration, atoi(value));
+                IMPORT_SETTING(settings.chromatic_aberration_strength, chromatic_aberration_strength,
+                               fmaxf(0.0F, fminf(10.0F, atof(value))));
+                IMPORT_SETTING(settings.filmic_tonemapping, filmic_tonemapping, atoi(value));
                 IMPORT_SETTING(settings.show_live_player_count, show_live_player_count, atoi(value));
                 IMPORT_SETTING(settings.ads_zoom_animation, ads_zoom_animation, atoi(value));
                 IMPORT_SETTING(settings.auto_demo_recording, auto_demo_recording, atoi(value));
@@ -1199,6 +1206,39 @@ void config_reload() {
                                  .name = "Lens flare",
                                  .category = "Visual Effects",
                                  .subcategory = "Lighting",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.chromatic_aberration,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Enable subtle RGB split at screen edges (lens effect)",
+                                 .name = "Chromatic aberration",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Post Processing",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.chromatic_aberration_strength,
+                                 .type = CONFIG_TYPE_FLOAT,
+                                 .min = 0,
+                                 .max = 10,
+                                 .help = "Chromatic aberration strength (0=none, 10=extreme)",
+                                 .name = "Chromatic aberration strength",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Post Processing",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.filmic_tonemapping,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Enable ACES filmic tone mapping (cinematic color curve)",
+                                 .name = "Filmic tone mapping",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Post Processing",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {

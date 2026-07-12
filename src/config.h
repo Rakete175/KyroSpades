@@ -110,6 +110,10 @@ extern struct RENDER_OPTIONS {
         float volumetric_light_brightness;
         float volumetric_light_range;
         int   lens_flare;
+        /* ── New visual shaders (chromatic aberration / filmic) ── */
+        int   chromatic_aberration;           /* 0 = off, 1 = on */
+        float chromatic_aberration_strength;  /* 0..10 — pixel offset at screen edge */
+        int   filmic_tonemapping;             /* 0 = off, 1 = ACES filmic curve */
         int disable_dynamic_fov;
         int textured_blocks;
         int minimap_zoom;
