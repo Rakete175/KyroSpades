@@ -1,20 +1,20 @@
 /*
-	Copyright (c) 2017-2020 ByteBit
+        Copyright (c) 2017-2020 ByteBit
 
-	This file is part of KyroSpades.
+        This file is part of KyroSpades.
 
-	KyroSpades is free software: you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation, either version 3 of the License, or
-	(at your option) any later version.
+        KyroSpades is free software: you can redistribute it and/or modify
+        it under the terms of the GNU General Public License as published by
+        the Free Software Foundation, either version 3 of the License, or
+        (at your option) any later version.
 
-	KyroSpades is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
+        KyroSpades is distributed in the hope that it will be useful,
+        but WITHOUT ANY WARRANTY; without even the implied warranty of
+        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+        GNU General Public License for more details.
 
-	You should have received a copy of the GNU General Public License
-	along with KyroSpades.  If not, see <http://www.gnu.org/licenses/>.
+        You should have received a copy of the GNU General Public License
+        along with KyroSpades.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #ifndef MAP_H
@@ -30,9 +30,15 @@ extern int map_size_y;
 extern int map_size_z;
 
 extern float fog_color[4];
+extern float sun_dir[3];
+
+/* fog_color_render: fills out[3] with the effective fog color for rendering.
+   When filmic tone mapping is enabled, the result is darkened by 10% to
+   compensate for ACES lifting shadows and keeping distant fog readable. */
+void fog_color_render(float out[3]);
 
 struct Point {
-	int x, y, z;
+        int x, y, z;
 };
 
 void map_init();
@@ -62,5 +68,6 @@ int map_height_at(int x, int z);
 void map_save_file(const char* filename);
 void map_copy_blocks(struct libvxl_chunk_copy* copy, size_t x, size_t y);
 int map_total_blocks(void);
+float map_sun_shadow(int x, int y, int z, int steps);
 
 #endif

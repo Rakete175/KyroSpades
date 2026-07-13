@@ -297,6 +297,15 @@ void config_save() {
         config_seti("client", "smooth_fog", settings.smooth_fog);
         config_seti("client", "water_shader", settings.water_shader);
         config_seti("client", "ambient_occlusion", settings.ambient_occlusion);
+        config_seti("client", "shadow_quality", settings.shadow_quality);
+        config_setf("client", "shadow_intensity", settings.shadow_intensity);
+        config_seti("client", "sky_gradient", settings.sky_gradient);
+        config_setf("client", "sky_gradient_intensity", settings.sky_gradient_intensity);
+        config_seti("client", "water_waves", settings.water_waves);
+        config_setf("client", "water_wave_intensity", settings.water_wave_intensity);
+        config_setf("client", "water_wave_speed", settings.water_wave_speed);
+        config_seti("client", "water_wave_mode", settings.water_wave_mode);
+        config_seti("client", "water_wave_tile_size", settings.water_wave_tile_size);
         config_setf("client", "camera_fov", settings.camera_fov);
         config_seti("client", "hold_down_sights", settings.hold_down_sights);
         config_setf("client", "chat_shadow", settings.chat_shadow);
@@ -319,6 +328,14 @@ void config_save() {
         config_setf("client", "saturation", settings.saturation);
         config_setf("client", "contrast", settings.contrast);
         config_setf("client", "vignette", settings.vignette);
+        config_seti("client", "volumetric_light", settings.volumetric_light);
+        config_setf("client", "volumetric_light_strength", settings.volumetric_light_strength);
+        config_setf("client", "volumetric_light_brightness", settings.volumetric_light_brightness);
+        config_setf("client", "volumetric_light_range", settings.volumetric_light_range);
+        config_seti("client", "lens_flare", settings.lens_flare);
+        config_seti("client", "chromatic_aberration", settings.chromatic_aberration);
+        config_setf("client", "chromatic_aberration_strength", settings.chromatic_aberration_strength);
+        config_seti("client", "filmic_tonemapping", settings.filmic_tonemapping);
         config_seti("client", "show_live_player_count", settings.show_live_player_count);
         config_seti("client", "ads_zoom_animation", settings.ads_zoom_animation);
         config_seti("client", "auto_demo_recording", settings.auto_demo_recording);
@@ -445,10 +462,33 @@ static int config_read_key(void* user, const char* section, const char* name, co
                 IMPORT_SETTING(settings.ui_spacing, ui_spacing, atoi(value));
                 IMPORT_SETTING(settings.ui_padding, ui_padding, atoi(value));
                 IMPORT_SETTING(settings.ao_multiplier, ao_multiplier, fmaxf(0.0F, atof(value)));
+                IMPORT_SETTING(settings.shadow_quality, shadow_quality, atoi(value));
+                IMPORT_SETTING(settings.shadow_intensity, shadow_intensity, fmaxf(0.0F, fminf(1.0F, atof(value))));
+                IMPORT_SETTING(settings.sky_gradient, sky_gradient, atoi(value));
+                IMPORT_SETTING(settings.sky_gradient_intensity, sky_gradient_intensity, fmaxf(0.0F, fminf(1.0F, atof(value))));
+                IMPORT_SETTING(settings.water_waves, water_waves, atoi(value));
+                IMPORT_SETTING(settings.water_wave_intensity, water_wave_intensity,
+                               fmaxf(1.0F, fminf(5.0F, atof(value))));
+                IMPORT_SETTING(settings.water_wave_speed, water_wave_speed,
+                               fmaxf(0.0F, fminf(5.0F, atof(value))));
+                IMPORT_SETTING(settings.water_wave_mode, water_wave_mode, atoi(value));
+                IMPORT_SETTING(settings.water_wave_tile_size, water_wave_tile_size, atoi(value));
                 IMPORT_SETTING(settings.exposure, exposure, fmaxf(-100.0F, fminf(100.0F, atof(value))));
                 IMPORT_SETTING(settings.saturation, saturation, fmaxf(-100.0F, fminf(100.0F, atof(value))));
                 IMPORT_SETTING(settings.contrast, contrast, fmaxf(-100.0F, fminf(100.0F, atof(value))));
                 IMPORT_SETTING(settings.vignette, vignette, fmaxf(0.0F, fminf(100.0F, atof(value))));
+                IMPORT_SETTING(settings.volumetric_light, volumetric_light, atoi(value));
+                IMPORT_SETTING(settings.volumetric_light_strength, volumetric_light_strength,
+                               fmaxf(0.0F, fminf(1.0F, atof(value))));
+                IMPORT_SETTING(settings.volumetric_light_brightness, volumetric_light_brightness,
+                               fmaxf(0.0F, fminf(1.0F, atof(value))));
+                IMPORT_SETTING(settings.volumetric_light_range, volumetric_light_range,
+                               fmaxf(0.1F, fminf(2.0F, atof(value))));
+                IMPORT_SETTING(settings.lens_flare, lens_flare, atoi(value));
+                IMPORT_SETTING(settings.chromatic_aberration, chromatic_aberration, atoi(value));
+                IMPORT_SETTING(settings.chromatic_aberration_strength, chromatic_aberration_strength,
+                               fmaxf(0.0F, fminf(10.0F, atof(value))));
+                IMPORT_SETTING(settings.filmic_tonemapping, filmic_tonemapping, atoi(value));
                 IMPORT_SETTING(settings.show_live_player_count, show_live_player_count, atoi(value));
                 IMPORT_SETTING(settings.ads_zoom_animation, ads_zoom_animation, atoi(value));
                 IMPORT_SETTING(settings.auto_demo_recording, auto_demo_recording, atoi(value));
@@ -885,6 +925,7 @@ void config_reload() {
                                  .defaults_length = 6,
                                  .label_callback = config_label_vsync,
                                  .category = "Graphic Settings",
+                                 .subcategory = "Display",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -894,6 +935,7 @@ void config_reload() {
                                  .max = 1,
                                  .name = "Fullscreen",
                                  .category = "Graphic Settings",
+                                 .subcategory = "Display",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -911,6 +953,7 @@ void config_reload() {
                                  .defaults_length = 5,
                                  .label_callback = config_label_msaa,
                                  .category = "Graphic Settings",
+                                 .subcategory = "Display",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -921,6 +964,7 @@ void config_reload() {
                                  .help = "Render models like in voxlap",
                                  .name = "Voxlap models",
                                  .category = "Graphic Settings",
+                                 .subcategory = "Display",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -931,6 +975,7 @@ void config_reload() {
                                  .help = "Render player hand during gameplay",
                                  .name = "Render hand",
                                  .category = "Graphic Settings",
+                                 .subcategory = "Display",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -951,6 +996,7 @@ void config_reload() {
                                  .help = "Join similar mesh faces",
                                  .name = "Greedy meshing",
                                  .category = "Graphic Settings",
+                                 .subcategory = "Meshing",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -961,6 +1007,7 @@ void config_reload() {
                                  .help = "Enable this on buggy drivers",
                                  .name = "Force Displaylist",
                                  .category = "Graphic Settings",
+                                 .subcategory = "Display",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -971,6 +1018,7 @@ void config_reload() {
                                  .help = "Enable this on buggy drivers",
                                  .name = "Smooth fog",
                                  .category = "Graphic Settings",
+                                 .subcategory = "Meshing",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -978,19 +1026,21 @@ void config_reload() {
                                  .type = CONFIG_TYPE_INT,
                                  .min = 0,
                                  .max = 1,
-                                 .help = "Reflective water surface",
-                                 .name = "Water shader",
-                                 .category = "Graphic Settings",
-                         });
-        list_add(&config_settings,
-                         &(struct config_setting) {
-                                 .value = &settings_tmp.ambient_occlusion,
+                                  .help = "Reflective water surface",
+                                  .name = "Water shader",
+                                  .category = "Visual Effects",
+                                  .subcategory = "Water",
+                          });
+         list_add(&config_settings,
+                          &(struct config_setting) {
+                                  .value = &settings_tmp.ambient_occlusion,
                                  .type = CONFIG_TYPE_INT,
                                  .min = 0,
                                  .max = 1,
                                  .help = "(won't work with greedy mesh)",
                                  .name = "Ambient occlusion",
                                  .category = "Graphic Settings",
+                                 .subcategory = "Meshing",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -1001,6 +1051,194 @@ void config_reload() {
                                  .help = "Multiplier for ambient occlusion strength",
                                  .name = "AO multiplier",
                                  .category = "Graphic Settings",
+                                 .subcategory = "Meshing",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.shadow_quality,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                  .help = "Realistic directional shadows from blocks",
+                                  .name = "Realistic shadows",
+                                  .category = "Visual Effects",
+                                  .subcategory = "Shadows",
+                          });
+         list_add(&config_settings,
+                          &(struct config_setting) {
+                                  .value = &settings_tmp.shadow_intensity,
+                                  .type = CONFIG_TYPE_FLOAT,
+                                  .min = 0,
+                                  .max = 1,
+                                  .help = "How dark sun shadows are",
+                                  .name = "Shadow intensity",
+                                  .category = "Visual Effects",
+                                  .subcategory = "Shadows",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.sky_gradient,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Blended sky gradient instead of flat color",
+                                 .name = "Sky gradient",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Sky",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.sky_gradient_intensity,
+                                 .type = CONFIG_TYPE_FLOAT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Intensity of the sky gradient effect",
+                                 .name = "Sky gradient intensity",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Sky",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.water_waves,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Animated waves on the water surface",
+                                 .name = "Water waves",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Water",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.water_wave_intensity,
+                                 .type = CONFIG_TYPE_FLOAT,
+                                 .min = 1,
+                                 .max = 5,
+                                 .help = "Height of water waves (1=normal, 5=extreme)",
+                                 .name = "Wave intensity",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Water",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.water_wave_speed,
+                                 .type = CONFIG_TYPE_FLOAT,
+                                 .min = 0,
+                                 .max = 5,
+                                 .help = "Wave speed (0=frozen, 1=normal, 5=fast)",
+                                 .name = "Wave speed",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Water",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.water_wave_mode,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Enable tile-based wave mode",
+                                 .name = "Tile mode",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Water",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.water_wave_tile_size,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 1,
+                                 .max = 4,
+                                 .help = "Tile size (1, 2, or 4)",
+                                 .name = "Wave tile size",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Water",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.volumetric_light,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Enable volumetric light scattering (a.k.a. Godrays)",
+                                 .name = "Volumetric light",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Lighting",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.volumetric_light_strength,
+                                 .type = CONFIG_TYPE_FLOAT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Strength of volumetric light (0 = off, 1 = strongest)",
+                                 .name = "Volumetric light strength",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Lighting",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.volumetric_light_brightness,
+                                 .type = CONFIG_TYPE_FLOAT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Brightness of the white ray glow (0=none, 1=full)",
+                                 .name = "Ray brightness",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Lighting",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.volumetric_light_range,
+                                 .type = CONFIG_TYPE_FLOAT,
+                                 .min = 0.1F,
+                                 .max = 2.0F,
+                                 .help = "Range of rays from sun (0.1=short, 2=full screen)",
+                                 .name = "Ray range",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Lighting",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.lens_flare,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Enable lens flare from the sun",
+                                 .name = "Lens flare",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Lighting",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.chromatic_aberration,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Enable subtle RGB split at screen edges (lens effect)",
+                                 .name = "Chromatic aberration",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Post Processing",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.chromatic_aberration_strength,
+                                 .type = CONFIG_TYPE_FLOAT,
+                                 .min = 0,
+                                 .max = 10,
+                                 .help = "Chromatic aberration strength (0=none, 10=extreme)",
+                                 .name = "Chromatic aberration strength",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Post Processing",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.filmic_tonemapping,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Enable ACES filmic tone mapping (cinematic color curve)",
+                                 .name = "Filmic tone mapping",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Post Processing",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -1039,6 +1277,7 @@ void config_reload() {
                                  .help = "Chat background opacity",
                                  .name = "Chat background opacity",
                                  .category = "Chat Settings",
+                                 .subcategory = "Chat",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -1079,6 +1318,7 @@ void config_reload() {
                                  .name = "Lighten colors",
                                  .help = "Makes in-game team colors in the HUD brighter",
                                  .category = "Graphic Settings",
+                                 .subcategory = "Color",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -1119,6 +1359,8 @@ void config_reload() {
                                  .help = "Spacing between messages in chat",
                                  .name = "Chat spacing",
                                  .category = "Chat Settings",
+                                 .subcategory = "Chat",
+                                 .subcategory = "Chat",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -1129,6 +1371,7 @@ void config_reload() {
                                  .help = "Reverse chat order, newest messages at the bottom",
                                  .name = "Reverse chat on open",
                                  .category = "Chat Settings",
+                                 .subcategory = "Chat",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -1138,6 +1381,7 @@ void config_reload() {
                                  .name = "Mention words",
                                  .help = "Words separated by commas that highlight chat messages",
                                  .category = "Chat Settings",
+                                 .subcategory = "Mentions",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -1148,6 +1392,7 @@ void config_reload() {
                                  .name = "Mention Highlight: Red",
                                  .help = "Mention highlight color (red)",
                                  .category = "Chat Settings",
+                                 .subcategory = "Mentions",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -1158,6 +1403,7 @@ void config_reload() {
                                  .name = "Mention Highlight: Green",
                                  .help = "Mention highlight color (green)",
                                  .category = "Chat Settings",
+                                 .subcategory = "Mentions",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -1168,6 +1414,7 @@ void config_reload() {
                                  .name = "Mention Highlight: Blue",
                                  .help = "Mention highlight color (blue)",
                                  .category = "Chat Settings",
+                                 .subcategory = "Mentions",
                          });
         list_add(&config_settings,
                          &(struct config_setting) {
@@ -1364,6 +1611,7 @@ void config_reload() {
                                  .help = "Adjust image exposure (-100 to +100)",
                                  .name = "Exposure",
                                  .category = "Graphic Settings",
+                                 .subcategory = "Color",
                          });
 
         list_add(&config_settings,
@@ -1375,6 +1623,7 @@ void config_reload() {
                                  .help = "Adjust image saturation (-100 to +100)",
                                  .name = "Saturation",
                                  .category = "Graphic Settings",
+                                 .subcategory = "Color",
                          });
 
         list_add(&config_settings,
@@ -1386,6 +1635,7 @@ void config_reload() {
                                  .help = "Adjust image contrast (-100 to +100)",
                                  .name = "Contrast",
                                  .category = "Graphic Settings",
+                                 .subcategory = "Color",
                          });
 
         list_add(&config_settings,
@@ -1397,6 +1647,7 @@ void config_reload() {
                                  .help = "Darkens edges of the screen (0 to 100)",
                                  .name = "Vignette",
                                  .category = "Graphic Settings",
+                                 .subcategory = "Color",
                          });
 
         list_add(&config_settings,
@@ -1440,61 +1691,61 @@ void config_reload() {
                                  .max = 60,
                                  .name = "Recording FPS",
                                  .help = "Frames per second for video recording",
-                                   .category = "Video Record/Replay",
+                                    .category = "Recording & Replay",
 
-                         });
-        list_add(&config_settings,
-                         &(struct config_setting) {
-                                 .value = &settings_tmp.recording_bitrate_kbps,
+                        });
+                list_add(&config_settings,
+                                 &(struct config_setting) {
+                                         .value = &settings_tmp.recording_bitrate_kbps,
                                  .type = CONFIG_TYPE_INT,
                                  .min = 500,
                                  .max = 50000,
                                  .name = "Recording bitrate (kbps)",
                                   .help = "Video bitrate in kilobits per second. Higher = better quality, larger file",
-                                    .category = "Video Record/Replay",
+                                    .category = "Recording & Replay",
 
-                                  });
-		list_add(&config_settings,
-		         &(struct config_setting) {
-		                 .value = &settings_tmp.replay_enabled,
-		                 .type = CONFIG_TYPE_INT,
-		                 .min = 0,
-		                 .max = 1,
-		                 .name = "Replay Enabled",
-		                 .help = "Continuously record segments for replay",
-                                   .category = "Video Record/Replay",
+                        });
+                list_add(&config_settings,
+                                 &(struct config_setting) {
+                                         .value = &settings_tmp.replay_enabled,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .name = "Replay Enabled",
+                                 .help = "Continuously record segments for replay",
+                                   .category = "Recording & Replay",
 
-		         });
-		list_add(&config_settings,
-		         &(struct config_setting) {
-		                 .value = &settings_tmp.replay_duration,
-		                 .type = CONFIG_TYPE_INT,
-		                 .min = 1,
-		                 .max = 300,
-		                 .name = "Replay Duration (s)",
-		                 .help = "Number of seconds of buffer to keep",
-                                   .category = "Video Record/Replay",
+                         });
+                list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.replay_duration,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 1,
+                                 .max = 300,
+                                 .name = "Replay Duration (s)",
+                                 .help = "Number of seconds of buffer to keep",
+                                   .category = "Recording & Replay",
 
-		         });
-		list_add(&config_settings,
-		         &(struct config_setting) {
-		                 .value = &settings_tmp.replay_save_hotkey,
-		                 .type = CONFIG_TYPE_INT,
-		                 .min = 0,
-		                 .max = INT_MAX,
-		                 .name = "Replay Save Hotkey",
-		                 .help = "Hotkey to save the current replay buffer",
-                                   .category = "Video Record/Replay",
+                         });
+                list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.replay_save_hotkey,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = INT_MAX,
+                                 .name = "Replay Save Hotkey",
+                                 .help = "Hotkey to save the current replay buffer",
+                                   .category = "Recording & Replay",
 
-		         });
-		list_add(&config_settings,
-		         &(struct config_setting) {
-		                 .value = settings_tmp.audio_monitor_source,
-		                 .type = CONFIG_TYPE_STRING,
-		                 .max = sizeof(settings.audio_monitor_source) - 1,
-		                 .name = "Audio Monitor Source",
-		                 .help = "PulseAudio monitor source for system audio capture",
-		                 .category = "Video Record/Replay",
-		         });
+                         });
+                list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = settings_tmp.audio_monitor_source,
+                                 .type = CONFIG_TYPE_STRING,
+                                 .max = sizeof(settings.audio_monitor_source) - 1,
+                                 .name = "Audio Monitor Source",
+                                 .help = "PulseAudio monitor source for system audio capture",
+                                 .category = "Video Record/Replay",
+                         });
 
 }
