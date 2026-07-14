@@ -18,7 +18,7 @@ target_include_directories(vxl PUBLIC ${KyroSpades_SOURCE_DIR}/deps/libvxl)
 # SDL2: prefer a system install (brew, MacPorts, etc.) to avoid a full source
 # build. Fall back to FetchContent only when nothing is found.
 if(ENABLE_SDL)
-        if(APPLE)
+        if(APPLE AND NOT IOS)
                 # Homebrew — probe silently, no error if brew isn't present
                 execute_process(
                         COMMAND brew --prefix sdl2
@@ -296,11 +296,18 @@ endif()
 if(ENABLE_SDL)
         if(SDL2_USE_FETCHCONTENT)
                 target_link_libraries(${KS_TARGET} SDL2::SDL2-static)
+        elseif(TARGET SDL2::SDL2-static)
+                target_link_libraries(${KS_TARGET} SDL2::SDL2-static)
         elseif(TARGET SDL2::SDL2)
                 target_link_libraries(${KS_TARGET} SDL2::SDL2)
         else()
                 target_link_libraries(${KS_TARGET} ${SDL2_LIBRARIES})
                 target_include_directories(${KS_TARGET} PRIVATE ${SDL2_INCLUDE_DIRS})
+        endif()
+        # iOS: SDL2main provides the real main() that boots the UIKit run loop and
+        # then calls our SDL_main (renamed from main() by SDL_main.h).
+        if(IOS AND TARGET SDL2::SDL2main)
+                target_link_libraries(${KS_TARGET} SDL2::SDL2main)
         endif()
         target_compile_definitions(${KS_TARGET} PRIVATE USE_SDL)
 endif()
@@ -315,6 +322,10 @@ if(ENABLE_SOUND)
                 # Static openal-soft is C++ and uses the OpenSL ES backend + logcat.
                 # Our target is pure C, so none of these get pulled in implicitly.
                 target_link_libraries(${KS_TARGET} OpenSLES log c++_static c++abi)
+        endif()
+        if(IOS)
+                # Static openal-soft on iOS uses the CoreAudio backend and is C++.
+                target_link_libraries(${KS_TARGET} "-framework AudioToolbox" "-framework CoreAudio" c++)
         endif()
         target_compile_definitions(${KS_TARGET} PRIVATE USE_SOUND)
 endif()
@@ -402,6 +413,12 @@ if(ANDROID)
         # use, but our libmain.so references the symbols directly and needs it too.
         target_link_libraries(${KS_TARGET} android)
         target_compile_definitions(${KS_TARGET} PRIVATE OPENGL_ES)
+elseif(IOS)
+        # iOS provides GL ES through the OpenGLES framework; no EGL, no GLEW.
+        # GLES_SILENCE_DEPRECATION quiets the (expected) "GL ES deprecated on iOS"
+        # warnings — GL ES still works fine; Apple just prefers Metal.
+        target_link_libraries(${KS_TARGET} "-framework OpenGLES")
+        target_compile_definitions(${KS_TARGET} PRIVATE OPENGL_ES GLES_SILENCE_DEPRECATION)
 elseif(NOT ENABLE_OPENGLES)
         find_package(OpenGL REQUIRED)
         find_package(GLEW REQUIRED)
@@ -426,6 +443,20 @@ endif()
 
 target_link_libraries(${KS_TARGET} ${CMAKE_THREAD_LIBS_INIT} ${OPENGL_LIBRARIES} enet::enet deflate::deflate m cglm vxl)
 target_include_directories(${KS_TARGET} PRIVATE ${OPENAL_INCLUDE_DIR} ${OPENAL_INCLUDE_DIRS} ${OPENGL_INCLUDE_DIR} ${OPENGL_EGL_INCLUDE_DIRS})
+
+# ── iOS system frameworks ─────────────────────────────────────────────────────
+# SDL2 (static) references these for video/input/audio/haptics. An installed
+# SDL2 config usually re-exports them, but listing them here is harmless if so
+# and saves a confusing wall of "Undefined symbols" if it doesn't.
+if(IOS)
+	target_link_libraries(${KS_TARGET}
+		"-framework UIKit"          "-framework Foundation"
+		"-framework CoreGraphics"   "-framework QuartzCore"
+		"-framework CoreMotion"     "-framework GameController"
+		"-framework AVFoundation"   "-framework CoreHaptics"
+		"-framework Metal"          "-framework CoreVideo"
+		"-framework ImageIO")
+endif()
 
 # ── Post-build resource copy (desktop only) ───────────────────────────────────
 # On Android, resources are packaged as APK assets by Gradle — no post-build

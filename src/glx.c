@@ -244,6 +244,16 @@ int glx_shader(const char* vertex, const char* fragment) {
         if(v) glDeleteShader(v);
         if(f) glDeleteShader(f);
 
+        /* Previously this returned `program` unconditionally, so a shader that
+           failed to compile or link still handed back a non-zero (but unusable)
+           program object. Callers that gate on `if(shader)` were then fooled into
+           using a dead program, whose draw call no-ops — which on iOS looked like
+           "the post-processed frame never reaches the screen". Return 0 on failure
+           so callers can detect it and fall back. */
+        if(!linked) {
+                glDeleteProgram(program);
+                return 0;
+        }
         return program;
 }
 

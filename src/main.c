@@ -353,11 +353,40 @@ void drawScene() {
         }
 }
 
+/* SDL's on-screen framebuffer.
+   ────────────────────────────────────────────────────────────────────────
+   On desktop/Android (EGL) it is object 0; on iOS (UIKit/EAGL) it is a
+   NON-zero EAGL viewFramebuffer and object 0 is off-screen. The id lives
+   in window.c and is now captured in two places that are both reliable:
+   (1) once at window_init after a forced initial swap (so SDL's lazy FBO
+   exists and is bound) and (2) every frame in window_update right after
+   SDL_GL_SwapWindow, where SDL's bindBackbuffer has just re-bound it.
+   Both updates use a non-zero guard so a transient 0 read can never wipe
+   out the captured value — that was v12's silent regression: a single 0
+   from glGetIntegerv at the start of the render block would clobber the
+   id and route every subsequent frame off-screen. */
+
 void display() {
         /* Apply pending window changes (fullscreen, vsync, size) every frame.
            drawScene() is skipped in the menus when not connected, so this must
            not live there or settings only take effect once in-game. */
         window_apply();
+
+        /* Capture the framebuffer that is bound RIGHT NOW, at the very top of the
+           frame, before we touch any post-process FBO. This is the framebuffer
+           SDL left bound coming out of the previous frame's swap — i.e. the one
+           that actually gets presented, and exactly the one the (working)
+           shaders-off direct-render path draws into implicitly. Earlier code
+           trusted a value captured in window_init / window_update (after swap),
+           which on iOS could read an MSAA/renderbuffer-resolve leftover rather
+           than the presented view FBO; binding that for the post-process
+           composite sent the whole frame — world, HUD, even a debug clear —
+           off-screen, leaving the last presented frame (the serverlist) frozen.
+           Reading it live here removes that guesswork. */
+        GLint live_screen_fbo = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &live_screen_fbo);
+        if(live_screen_fbo > 0)
+                window_gl_default_framebuffer = (int)live_screen_fbo;
 
         if(network_map_transfer) {
                 glClearColor(0.0F, 0.0F, 0.0F, 1.0F);
@@ -367,12 +396,41 @@ void display() {
                 glClearColor(fc[0], fc[1], fc[2], fog_color[3]);
         }
 
+        /* Treat near-zero slider values as OFF: the on-screen sliders can't
+           always land exactly on 0 (touch precision), and a visually-nil
+           post-process pass would otherwise keep running. */
         int needs_postproc = ((glx_version || gles_version >= 2)
-                              && (settings.exposure != 0 || settings.saturation != 0 || settings.contrast != 0
-                                  || settings.vignette != 0 || settings.volumetric_light || settings.lens_flare
+                              && (settings.exposure < -0.5F || settings.exposure > 0.5F
+                                  || settings.saturation < -0.5F || settings.saturation > 0.5F
+                                  || settings.contrast < -0.5F || settings.contrast > 0.5F
+                                  || settings.vignette > 0.5F || settings.volumetric_light || settings.lens_flare
                                   || settings.chromatic_aberration || settings.filmic_tonemapping));
 
         if(hud_active->render_world || network_connected) {
+                /* Per-frame backup re-capture, in case SDL recreated the FBO mid-run
+                   (orientation change etc.) between swap and the next swap. NON-ZERO
+                   GUARD is critical: this is exactly where v12 silently broke — it
+                   stored any value >= 0 including 0, and a single 0 read here wiped
+                   the good FBO id captured at startup, sending every subsequent
+                   render off-screen. We only accept positive values; on desktop the
+                   var stays 0 (the correct default FBO there) because nothing here
+                   ever overwrites it. */
+                {
+                        GLint fb = -1;
+                        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fb);
+                        if(fb > 0)
+                                window_gl_default_framebuffer = fb;
+                }
+
+#if defined(OS_IOS)
+                /* Belt-and-braces: if we somehow still don't have a real drawable
+                   FBO id, refuse to enter the postproc path. Compositing would
+                   target FBO 0 (off-screen on iOS) and the world would vanish.
+                   Better to ship the unshaded frame than to lose the game. */
+                if(live_screen_fbo == 0)
+                        needs_postproc = 0;
+#endif
+
                 if(needs_postproc) {
                         if(postproc.texture && (postproc.w != settings.window_width || postproc.h != settings.window_height)) {
                                 glDeleteFramebuffers(1, &postproc.fbo);
@@ -400,6 +458,16 @@ void display() {
                         }
 
                         if(!postproc.fbo) {
+#if defined(OS_IOS)
+                                /* iOS: do NOT create an off-screen FBO. Repeated attempts to
+                                   identify SDL's presented framebuffer and composite into it all
+                                   failed — the composited frame went off-screen and the screen
+                                   froze. Instead we leave postproc.fbo = 0 and use "copy mode":
+                                   render the world straight to the screen (the path that already
+                                   works with shaders off), copy it into postproc.texture, then
+                                   redraw it through the grade shader. Nothing here needs to know
+                                   the screen FBO id. */
+#else
                                 glGenFramebuffers(1, &postproc.fbo);
                                 glBindFramebuffer(GL_FRAMEBUFFER, postproc.fbo);
                                 glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, postproc.texture, 0);
@@ -435,7 +503,9 @@ void display() {
                                         postproc.texture = 0;
                                         postproc.depth_tex = 0;
                                 }
-                                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                                glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)live_screen_fbo);
+                                glBindRenderbuffer(GL_RENDERBUFFER, 0);
+#endif
                         }
 
                         /* Volumetric light output texture + FBO (color only, no depth).
@@ -459,7 +529,7 @@ void display() {
                                         postproc.vol_fbo = 0;
                                         postproc.vol_tex = 0;
                                 }
-                                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                                glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)live_screen_fbo);
                         }
 
                         postproc.w = settings.window_width;
@@ -943,7 +1013,16 @@ void display() {
                                 }
                         }
 
-                        if(postproc.fbo)
+#if defined(OS_IOS)
+                        /* Copy mode: no FBO required, only the grade shader. */
+                        if(!postproc.shader)
+                                needs_postproc = 0;
+#else
+                        if(!postproc.fbo || !postproc.shader)
+                                needs_postproc = 0;
+#endif
+
+                        if(needs_postproc && postproc.fbo)
                                 glBindFramebuffer(GL_FRAMEBUFFER, postproc.fbo);
                 }
 
@@ -1259,6 +1338,20 @@ void display() {
 
                                 glDisable(GL_DEPTH_TEST);
                                 glDepthMask(GL_FALSE);
+                                /* The world is rendered into postproc.texture with alpha=0 in
+                                   many places (geometry colours use a=0). If GL_BLEND is still
+                                   enabled from earlier rendering, the composite quad would blend
+                                   using that 0 alpha and write NOTHING to the screen — the frame
+                                   stays on whatever was last presented (the serverlist). That is
+                                   the "frozen serverlist with shaders on" bug. The shader now
+                                   also forces alpha=1, but disabling blend here makes it robust
+                                   regardless of the sampled colour's alpha. */
+                                GLboolean blend_was_on = glIsEnabled(GL_BLEND);
+                                glDisable(GL_BLEND);
+                                glDisable(GL_SCISSOR_TEST);
+                                glDisable(GL_CULL_FACE);
+                                glViewport(0, 0, settings.window_width, settings.window_height);
+                                glActiveTexture(GL_TEXTURE0);
 
                                 /* === Volumetric light (god-rays) pass ===
                                    Faithful port of Luanti's pipeline: sample the scene color
@@ -1451,10 +1544,17 @@ void display() {
                                 }
 
                                 if(postproc.fbo) {
-                                        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                                        /* Off-screen-FBO path (desktop/non-iOS): bind the screen and
+                                           sample the world texture we rendered into. */
+                                        glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)live_screen_fbo);
                                         glBindTexture(GL_TEXTURE_2D, postproc.vol_applied ? postproc.vol_tex : postproc.texture);
                                 } else if(postproc.texture) {
-                                        glReadBuffer(GL_BACK);
+                                        /* Copy mode (iOS): the world was just rendered straight to the
+                                           screen. Copy it into postproc.texture (reads the currently
+                                           bound framebuffer — no FBO id needed, no glReadBuffer which
+                                           isn't in GLES2), then the shader quad below redraws it graded
+                                           over the same screen. If the quad pass fails for any reason,
+                                           the un-graded world is already visible — no more freeze. */
                                         glBindTexture(GL_TEXTURE_2D, postproc.texture);
                                         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, settings.window_width, settings.window_height);
                                 }
@@ -1495,6 +1595,8 @@ void display() {
                                 glDepthMask(GL_TRUE);
                                 glClear(GL_DEPTH_BUFFER_BIT);
                                 glEnable(GL_DEPTH_TEST);
+                                if(blend_was_on)
+                                        glEnable(GL_BLEND);
 
                                 memcpy(matrix_projection, saved_proj2, sizeof(mat4));
                                 memcpy(matrix_view, saved_view2, sizeof(mat4));
@@ -1504,7 +1606,7 @@ void display() {
                         }
                 }
                 if(needs_postproc && network_map_transfer && postproc.fbo) {
-                        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                        glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)live_screen_fbo);
                 }
         }
 
@@ -1931,6 +2033,92 @@ void on_error(int i, const char* s) {
         getchar();
 }
 
+#if defined(OS_APPLE)
+/* ── iOS resource staging ─────────────────────────────────────────────────────
+   Copies the read-only bundle assets into the writable prefs dir on first run
+   (or after a version bump) so the rest of the engine can keep using relative
+   paths verbatim. Pure POSIX + SDL filesystem; no Objective-C needed. */
+#include <dirent.h>
+
+static void ios_copy_file(const char* src, const char* dst) {
+        struct stat ss, ds;
+        if(stat(src, &ss) != 0) return;
+        if(stat(dst, &ds) == 0 && ds.st_mtime >= ss.st_mtime) return;
+        FILE* in = fopen(src, "rb");
+        if(!in) return;
+        FILE* out = fopen(dst, "wb");
+        if(!out) { fclose(in); return; }
+        char buf[1 << 16];
+        size_t n;
+        while((n = fread(buf, 1, sizeof(buf), in)) > 0)
+                fwrite(buf, 1, n, out);
+        fclose(out);
+        fclose(in);
+}
+
+static void ios_copy_tree(const char* src, const char* dst) {
+        ks_mkdir(dst, 0755);
+        DIR* d = opendir(src);
+        if(!d) return;
+        struct dirent* e;
+        while((e = readdir(d))) {
+                const char* nm = e->d_name;
+                if(!strcmp(nm, ".") || !strcmp(nm, ".."))
+                        continue;
+                /* Never copy bundle metadata or the executable itself. */
+                if(!strcmp(nm, "client") || !strcmp(nm, "Info.plist")
+                   || !strcmp(nm, "PkgInfo") || !strcmp(nm, "_CodeSignature")
+                   || !strcmp(nm, "embedded.mobileprovision"))
+                        continue;
+                char s[2048], t[2048];
+                snprintf(s, sizeof(s), "%s/%s", src, nm);
+                snprintf(t, sizeof(t), "%s/%s", dst, nm);
+                struct stat st;
+                if(stat(s, &st) != 0)
+                        continue;
+                if(S_ISDIR(st.st_mode))
+                        ios_copy_tree(s, t);
+                else
+                        ios_copy_file(s, t);
+        }
+        closedir(d);
+}
+
+static void ios_stage_resources_and_chdir(void) {
+        char* base = SDL_GetBasePath();                       /* read-only bundle */
+        char* pref = SDL_GetPrefPath("KyroSpades", "client"); /* writable sandbox */
+        if(!pref) {
+                if(base) SDL_free(base);
+                return;
+        }
+
+        char stamp[2048];
+        snprintf(stamp, sizeof(stamp), "%s.staged_version", pref);
+
+        int need_stage = 1;
+        FILE* sf = fopen(stamp, "r");
+        if(sf) {
+                char have[64] = {0};
+                if(fgets(have, sizeof(have), sf))
+                        need_stage = strcmp(have, KYROSPADES_VERSION) != 0;
+                fclose(sf);
+        }
+
+        if(need_stage && base) {
+                log_info("iOS: staging bundle resources into %s", pref);
+                ios_copy_tree(base, pref);
+                sf = fopen(stamp, "w");
+                if(sf) { fputs(KYROSPADES_VERSION, sf); fclose(sf); }
+        }
+
+        if(chdir(pref) != 0)
+                log_error("iOS: chdir to prefs dir failed");
+
+        if(base) SDL_free(base);
+        SDL_free(pref);
+}
+#endif /* OS_APPLE */
+
 int main(int argc, char** argv) {
         settings.opengl14 = 1;
         settings.color_correction = 0;
@@ -2009,6 +2197,28 @@ int main(int argc, char** argv) {
                         const char* internal = SDL_AndroidGetInternalStoragePath();
                         if(internal) chdir(internal);
                 }
+        }
+#elif defined(OS_IOS)
+        /* iOS sandboxes every app: the .app bundle is read-only and the process
+           CWD is not writable. We copy the read-only assets out of the bundle
+           into the writable prefs dir once (re-staged when the version changes),
+           then chdir there so all the existing relative paths — both reads and
+           writes — resolve exactly like they do on desktop. */
+        ios_stage_resources_and_chdir();
+#elif defined(OS_APPLE)
+        {
+                char* base = SDL_GetBasePath();
+                char* pref = SDL_GetPrefPath("KyroSpades", "client");
+                if(pref) {
+                        if(base) {
+                                char res[2048];
+                                snprintf(res, sizeof(res), "%s../Resources", base);
+                                ios_copy_tree(res, pref);
+                        }
+                        chdir(pref);
+                        SDL_free(pref);
+                }
+                if(base) SDL_free(base);
         }
 #endif
         /* Create the writable subdirs on every platform. "demos" is included now —

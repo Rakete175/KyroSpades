@@ -1127,7 +1127,9 @@ void read_PacketVersionGet(void* data, int len) {
         char* os = "KyroSpades (Haiku) " BS_VER_INFO;
 #endif
 #else
-#ifdef USE_TOUCH
+#if defined(OS_IOS)
+        char* os = "KyroSpades (iOS) " BS_VER_INFO;
+#elif defined(USE_TOUCH)
         char* os = "KyroSpades (Android) " BS_VER_INFO;
 #else
         char* os = "KyroSpades (Embedded) " BS_VER_INFO;

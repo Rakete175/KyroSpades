@@ -2,6 +2,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <math.h>
+#include <sys/stat.h>
 
 #include "common.h"
 #include "skins.h"
@@ -115,7 +116,14 @@ void skins_scan(void) {
 
 		struct dirent* entry;
 		while((entry = readdir(dir)) != NULL) {
-			if(entry->d_type == DT_REG || entry->d_type == DT_UNKNOWN) {
+			/* d_type is unreliable: MinGW and some filesystems always report
+			   DT_UNKNOWN, so we can't gate on DT_REG. stat() the path and test
+			   S_ISREG instead — correct on every platform. This replaces the
+			   old CI-time sed patch that rewrote this block on Windows only. */
+			struct stat st;
+			char stat_path[512];
+			snprintf(stat_path, sizeof(stat_path), "kv6/%s", entry->d_name);
+			if(stat(stat_path, &st) == 0 && S_ISREG(st.st_mode)) {
 				const char* name = entry->d_name;
 				int len = strlen(name);
 				if(len > 4 && strcmp(name + len - 4, ".kv6") == 0) {

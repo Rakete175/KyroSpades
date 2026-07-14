@@ -498,10 +498,25 @@ void kv6_render(struct kv6_t* kv6, unsigned char team) {
 			glBindTexture(GL_TEXTURE_2D, texture_dummy.texture_id);
 
 		if(kv6->colorize) {
-#if !defined(OPENGL_ES)
+#if defined(OPENGL_ES)
+			if(gles_version >= 2) {
+				/* This (mesh, !voxlap_models) is the DEFAULT render path. The held
+				   block model's voxels are baked WHITE here with per-vertex colour,
+				   and the ES2 default shader computes a_Color * u_TeamColor. On ES2
+				   the old glTexEnvfv tint below is a fixed-function NO-OP, so the
+				   block rendered plain white. Pushing the tint into u_TeamColor
+				   (white * tint = the chosen colour) recolours it. The team-colour
+				   switch just below overwrites u_TeamColor before list 1, and it is
+				   reset to white at the end of the function, so nothing else is
+				   affected. Only model_block sets colorize. */
+				glx_set_team_color(kv6->red, kv6->green, kv6->blue);
+			} else {
+				glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, (float[]) {kv6->red, kv6->green, kv6->blue, 1.0F});
+			}
+#else
 			glEnable(GL_TEXTURE_2D);
-#endif
 			glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, (float[]) {kv6->red, kv6->green, kv6->blue, 1.0F});
+#endif
 		}
 
 			matrix_push(matrix_model);

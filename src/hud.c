@@ -95,6 +95,50 @@ static int is_inside(double mx, double my, int x, int y, int w, int h) {
         return mx >= x && mx < x + w && my >= y && my < y + h;
 }
 
+/* -- Block-colour palette geometry --------------------------------------
+   The 8x8 swatch grid in the bottom-right corner. It used to be a hard-coded
+   64px square (8px cells), far too small on a Retina/HIGHDPI iOS drawable.
+   These helpers express it as a fraction of window_height so it scales (~3x
+   bigger) and so the renderer, the touch hit-test and the aim-zone exclusion
+   (window.c) all derive the SAME rect. Coordinates are HUD/GL space: origin
+   bottom-left, y UP (matching the ortho in main.c). Grid row gy=0 is the TOP
+   row, matching texture_block_color()'s convention. NOTE: window.c's
+   window_aim_zone() mirrors these fractions -- keep in sync. */
+#define PALETTE_CELLS 8
+static inline float palette_cell(void)   { return settings.window_height * 0.032F; }
+static inline float palette_size(void)   { return palette_cell() * PALETTE_CELLS; }
+static inline float palette_right(void)  { return settings.window_width - settings.window_height * 0.025F; }
+static inline float palette_left(void)   { return palette_right() - palette_size(); }
+static inline float palette_bottom(void) { return settings.window_height * 0.045F; }   /* GL y, clears home indicator */
+static inline float palette_top(void)    { return palette_bottom() + palette_size(); } /* GL y of grid top */
+
+/* Map a touch point (screen coords, y DOWN) to a grid cell, clamping to
+   [0,7] so a drag that strays slightly off-grid still scrubs the edge row. */
+static void palette_cell_clamp(float sx, float sy, int* gx, int* gy) {
+        float gl_y = settings.window_height - sy;
+        int cx = (int)((sx - palette_left()) / palette_cell());
+        int cy = (int)((palette_top() - gl_y) / palette_cell()); /* gy=0 at top */
+        if(cx < 0) cx = 0;
+        if(cx > 7) cx = 7;
+        if(cy < 0) cy = 0;
+        if(cy > 7) cy = 7;
+        *gx = cx;
+        *gy = cy;
+}
+
+/* Strict membership test (no clamp): did a touch START inside the palette? */
+static int palette_contains(float sx, float sy) {
+        float gl_y = settings.window_height - sy;
+        /* Right bound is the SCREEN EDGE (window_width), not palette_right(): the
+           rightmost colour column sits against the edge, where iOS touches are
+           least reliable (edge digitizer + system-gesture zones) — the same
+           problem the bottom row had. Extending the catch zone across the right
+           margin to the very edge means a tap aimed at the last column still
+           registers; palette_cell_clamp() maps any x past the last column back to
+           column 7. The visual grid is unchanged; this is the invisible hit area. */
+        return sx >= palette_left() && sx < settings.window_width && gl_y >= palette_bottom() && gl_y < palette_top();
+}
+
 static void format_comma(char* buffer, int value) {
         char tmp[32];
         sprintf(tmp, "%d", value);
@@ -128,7 +172,12 @@ inline int hud_accent_color() {
 }
 
 float hud_ui_scale(void) {
-#if defined(__ANDROID__)
+#if defined(OS_IOS)
+        /* Every iOS device is a high-DPI Retina display, and with HIGHDPI the
+           drawable is full native resolution, so the microui menus (serverlist,
+           settings, demos) render tiny at 1.0. Double them. */
+        return 2.0F;
+#elif defined(__ANDROID__)
         /* Enlarge touch targets on physically small, high-resolution screens.
            Android-only for now: the >=1920 heuristic would otherwise also double
            the UI on ordinary 1080p desktop monitors. Proper DPI-based scaling for
@@ -685,10 +734,15 @@ static int hud_ingame_onscreencontrol(int index, char* str, int activate) {
                                         case 2:
                                                 if(str)
                                                         strcpy(str, "Score");
-                                                if(activate == 0)
-                                                        keys(hud_window, WINDOW_KEY_TAB, 0, WINDOW_RELEASE, 0);
-                                                if(activate == 1)
-                                                        keys(hud_window, WINDOW_KEY_TAB, 0, WINDOW_PRESS, 0);
+                                                /* A touch tap is press+release in quick succession, so the
+                                                   hold-to-view scoreboard would only flash for a frame.
+                                                   Toggle it instead: each tap flips TAB held/released. */
+                                                if(activate == 1) {
+                                                        static int score_held = 0;
+                                                        score_held = !score_held;
+                                                        keys(hud_window, WINDOW_KEY_TAB, 0,
+                                                                 score_held ? WINDOW_PRESS : WINDOW_RELEASE, 0);
+                                                }
                                                 return 1;
                                         case 3:
                                                 if(str)
@@ -720,6 +774,30 @@ static int hud_ingame_onscreencontrol(int index, char* str, int activate) {
                                                 if(activate == 1)
                                                         mouse_scroll(hud_window, 0, -1);
                                                 return 1;
+                                        case 7:
+#if defined(OS_IOS)
+                                                /* iOS has no hardware back button the way Android does, so
+                                                   surface Escape as an on-screen "Menu" button: it opens/closes
+                                                   the in-game exit menu, exactly like pressing Esc on desktop.
+                                                   Rightmost slot keeps indices 0-6 (and their touch zones)
+                                                   untouched.
+                                                   Route through hud_ingame_keyboard, NOT keys(): the exit menu
+                                                   toggle (`show_exit ^= 1`) lives in the hud's keyboard
+                                                   callback (~hud.c:3097). keys() only sets
+                                                   window_pressed_keys[ESCAPE], which nothing polls — so the
+                                                   v12 version of this case appeared to do nothing. The other
+                                                   menu-opening buttons (Team case 3, Weapon case 4) use the
+                                                   same hud_ingame_keyboard path for the same reason. */
+                                                if(str)
+                                                        strcpy(str, "Menu");
+                                                if(activate == 0)
+                                                        hud_ingame_keyboard(WINDOW_KEY_ESCAPE, WINDOW_RELEASE, 0, 0);
+                                                if(activate == 1)
+                                                        hud_ingame_keyboard(WINDOW_KEY_ESCAPE, WINDOW_PRESS, 0, 0);
+                                                return 1;
+#else
+                                                return 0;
+#endif
                                         case 64:
                                                 if(str)
                                                         strcpy(str, "LMB");
@@ -790,6 +868,22 @@ static int hud_ingame_onscreencontrol(int index, char* str, int activate) {
                                 if(activate == 1)
                                         hud_ingame_keyboard(WINDOW_KEY_ESCAPE, WINDOW_PRESS, 0, 0);
                                 return 1;
+                        case 2:
+#if defined(OS_IOS)
+                                /* iOS's software keyboard overlays the bottom of the screen and
+                                   hides the chat history, with no built-in dismiss button (unlike
+                                   Android's keyboard down-arrow). This toggle hides the keyboard
+                                   WITHOUT leaving chat mode, so the player can read back the last
+                                   messages, then tap again to bring the keyboard back and type.
+                                   Label tracks the current state. Fires on TOUCH_DOWN only. */
+                                if(str)
+                                        strcpy(str, window_textinput_active() ? "Hide KB" : "Show KB");
+                                if(activate == 1)
+                                        window_textinput(window_textinput_active() ? 0 : 1);
+                                return 1;
+#else
+                                return 0;
+#endif
                 }
         }
         return 0;
@@ -1614,23 +1708,30 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
                         float gmi_y = 54.F;
 
                         if(players[local_id].held_item == TOOL_BLOCK) {
-                                gmi_y += 64.F;
+                                /* Push the elements above (live player count) up by the palette
+                                   height so they clear the now-larger grid. */
+                                gmi_y += palette_size();
 
+                                float cell = palette_cell();
+                                /* Background swatch grid (the texture scales to the new size). */
+                                glColor3f(1.0F, 1.0F, 1.0F);
+                                texture_draw(&texture_color_selection, palette_left(), palette_top(),
+                                                         palette_size(), palette_size());
+
+                                /* Blinking outline on the currently-selected swatch. */
                                 for(int y = 0; y < 8; y++) {
                                         for(int x = 0; x < 8; x++) {
                                                 if(texture_block_color(x, y) == players[local_id].block.packed) {
                                                         unsigned char g = (((int)(window_time() * 4)) & 1) * 0xFF;
                                                         glColor3ub(g, g, g);
-                                                        texture_draw_empty(settings.window_width + (x * 8 - 65 - 7), 48.F + (65 - y * 8),
-                                                                                           8, 8);
+                                                        texture_draw_empty(palette_left() + x * cell, palette_top() - y * cell,
+                                                                                           cell, cell);
                                                         y = 10; // to break outer loop too
                                                         break;
                                                 }
                                         }
                                 }
                                 glColor3f(1.0F, 1.0F, 1.0F);
-
-                                texture_draw(&texture_color_selection, settings.window_width - 64 - 7, 48.F + 64, 64, 64);
                         }
 
                         if(settings.show_live_player_count) {
@@ -1694,20 +1795,23 @@ static void hud_ingame_render(mu_Context* ctx, float scalex, float scalef) {
                 if(camera_mode == CAMERAMODE_SPECTATOR && spec_color_palette_time > window_time()) {
                         unsigned int cur = rgb((int)(fog_color[0] * 255.0F + 0.5F), (int)(fog_color[1] * 255.0F + 0.5F),
                                                                    (int)(fog_color[2] * 255.0F + 0.5F));
+                        float cell = palette_cell();
+                        glColor3f(1.0F, 1.0F, 1.0F);
+                        texture_draw(&texture_color_selection, palette_left(), palette_top(),
+                                                 palette_size(), palette_size());
                         for(int y = 0; y < 8; y++) {
                                 for(int x = 0; x < 8; x++) {
                                         if(texture_block_color(x, y) == cur) {
                                                 unsigned char g = (((int)(window_time() * 4)) & 1) * 0xFF;
                                                 glColor3ub(g, g, g);
-                                                texture_draw_empty(settings.window_width + (x * 8 - 65 - 7), 48.F + (65 - y * 8),
-                                                                                   8, 8);
+                                                texture_draw_empty(palette_left() + x * cell, palette_top() - y * cell,
+                                                                                   cell, cell);
                                                 y = 10;
                                                 break;
                                         }
                                 }
                         }
                         glColor3f(1.0F, 1.0F, 1.0F);
-                        texture_draw(&texture_color_selection, settings.window_width - 64 - 7, 48.F + 64, 64, 64);
                 }
 
                 if(settings.player_stats && network_connected && network_logged_in
@@ -2359,22 +2463,30 @@ texture_draw_empty_rotated(settings.window_width - 143 * scalef + tent2_x * map_
         /* Jump + Crouch side by side directly below the left joystick (the
            joystick circle ends at 0.1 * window_height; these plates occupy the
            strip underneath it). Only shown alongside the joystick, i.e. when
-           actually controlling a player or spectating in fly mode. */
+           actually controlling a player or spectating in fly mode.
+           Center moved from cy=0.05H up to cy=0.08H: after HIGHDPI the buttons
+           sit in pixel space, and at cy=0.05H the bottom edge of the visible
+           plate (y_gl=0) lands inside iOS's home-indicator edge-protection
+           strip. Taps there are first-pass intercepted by the OS for the
+           home gesture, so the bottom half of the button felt dead. The
+           hit-test rect below is intentionally taller and wider than the
+           visual rect for the same reason — see the matching is_inside_centered
+           calls in hud_ingame_touch. */
         if(camera_mode == CAMERAMODE_FPS || camera_mode == CAMERAMODE_SPECTATOR) {
                 /* Crouch left, Jump right -- mirroring the muscle memory of
                    CTRL (left) / Space (right) on a PC keyboard. */
                 if(hud_ingame_onscreencontrol(67, str, -1)) {
                         texture_draw_rotated(&texture_ui_input, settings.window_height * 0.195F,
-                                                                 settings.window_height * 0.05F, settings.window_height * 0.15F,
+                                                                 settings.window_height * 0.08F, settings.window_height * 0.15F,
                                                                  settings.window_height * 0.1F, 0.0F);
-                        font_centered(settings.window_height * 0.195F, settings.window_height * 0.07F,
+                        font_centered(settings.window_height * 0.195F, settings.window_height * 0.10F,
                                                   settings.window_height * 0.04F, str);
                 }
                 if(hud_ingame_onscreencontrol(66, str, -1)) {
                         texture_draw_rotated(&texture_ui_input, settings.window_height * 0.405F,
-                                                                 settings.window_height * 0.05F, settings.window_height * 0.15F,
+                                                                 settings.window_height * 0.08F, settings.window_height * 0.15F,
                                                                  settings.window_height * 0.1F, 0.0F);
-                        font_centered(settings.window_height * 0.405F, settings.window_height * 0.07F,
+                        font_centered(settings.window_height * 0.405F, settings.window_height * 0.10F,
                                                   settings.window_height * 0.04F, str);
                 }
         }
@@ -3513,17 +3625,34 @@ static void hud_ingame_touch(void* finger, int action, float x, float y, float d
                 /* Jump/Crouch plates below the joystick. Hit-testing keys off the
                    finger's START position (like every other control), so a press that
                    begins on a button stays a button even if it wanders, and a stick
-                   grab can't slide into a button. */
+                   grab can't slide into a button.
+                   VIRTUAL hit rect is much larger than the visual plate
+                   (0.24 x 0.22H vs 0.15 x 0.1H) and is the invisible touch zone
+                   only — the drawn button is unchanged. Sizing is bounded by two
+                   neighbours:
+                     - Horizontally: the two plate centers are 0.21H apart
+                       (0.195H and 0.405H), so a half-width of 0.12H makes them
+                       just meet at x=0.30H. Crouch is tested first, so the seam
+                       resolves to crouch — harmless.
+                     - Vertically/up: the joystick ring occupies flipped-y
+                       ~[0.15H, 0.45H]. The rect top at ~0.20H overlaps the ring's
+                       bottom sliver; again buttons-first means a low stick grab
+                       that strays down reads as the button, which is the
+                       forgiving behaviour anyway.
+                     - Vertically/down: extends to the screen bottom. iOS may
+                       first-pass eat a touch that STARTS in the home-indicator
+                       strip, but presses land near the plate center (cy=0.08H),
+                       well clear of it, so the extra downward area is usable. */
                 if(camera_mode == CAMERAMODE_FPS || camera_mode == CAMERAMODE_SPECTATOR) {
                         if(is_inside_centered(f->start.x, settings.window_height - f->start.y, settings.window_height * 0.195F,
-                                                                  settings.window_height * 0.05F, settings.window_height * 0.15F,
-                                                                  settings.window_height * 0.1F)) {
+                                                                  settings.window_height * 0.09F, settings.window_height * 0.24F,
+                                                                  settings.window_height * 0.22F)) {
                                 hud_ingame_onscreencontrol(67, NULL, (action == TOUCH_DOWN) ? 1 : 0);
                                 return;
                         }
                         if(is_inside_centered(f->start.x, settings.window_height - f->start.y, settings.window_height * 0.405F,
-                                                                  settings.window_height * 0.05F, settings.window_height * 0.15F,
-                                                                  settings.window_height * 0.1F)) {
+                                                                  settings.window_height * 0.09F, settings.window_height * 0.24F,
+                                                                  settings.window_height * 0.22F)) {
                                 hud_ingame_onscreencontrol(66, NULL, (action == TOUCH_DOWN) ? 1 : 0);
                                 return;
                         }
@@ -3531,6 +3660,24 @@ static void hud_ingame_touch(void* finger, int action, float x, float y, float d
         }
 
         if(screen_current == SCREEN_NONE) {
+                /* Block-colour palette (bottom-right). Only while actually holding
+                   the block tool in FPS — that's the only time the grid is drawn,
+                   and the only time we steal this corner from camera look. A tap
+                   selects the swatch under the finger; that's all that's needed
+                   (no drag/scrub). The whole gesture is consumed (return) so a
+                   tap that wobbles into a tiny drag can't swing the camera.
+                   window.c excludes this same rect from the aim zone under the
+                   same condition, so the finger is delivered here, not to look. */
+                if(camera_mode == CAMERAMODE_FPS && players[local_player_id].held_item == TOOL_BLOCK
+                   && palette_contains(f->start.x, f->start.y)) {
+                        if(action == TOUCH_DOWN) {
+                                int gx, gy;
+                                palette_cell_clamp(x, y, &gx, &gy);
+                                players[local_player_id].block.packed = texture_block_color(gx, gy);
+                                network_updateColor();
+                        }
+                        return;
+                }
                 if(action == TOUCH_DOWN && x > settings.window_width - settings.window_height * 0.25F
                    && y < settings.window_height * 0.25F) {
                         window_pressed_keys[WINDOW_KEY_MAP] = !window_pressed_keys[WINDOW_KEY_MAP];
@@ -3717,8 +3864,12 @@ static void hud_serverlist_init() {
                 serverlist_checked_for_updates = 1;
         }
 #endif
+#ifndef OS_IOS
+        /* The aos.party news endpoint is defunct; skip it on iOS. Other
+           platforms keep the request (it fails gracefully if the host is gone). */
         if(!serverlist_news_exists)
                 request_news = http_get("http://aos.party/bs/news/", NULL);
+#endif
 
         serverlist_con_established = request_serverlist != NULL;
         memcpy(serverlist_input, settings.last_address, sizeof settings.last_address);
@@ -3967,6 +4118,28 @@ void hud_common_sidebar(mu_Context* ctx, float scalex, float scaley) {
         mu_begin_panel(ctx, "Navigation");
         mu_layout_row(ctx, 1, (int[]) {-1}, 0);
 
+#if defined(OS_IOS)
+        /* iOS has no hardware back button and no Escape key, and while a menu
+           hud is active the in-game HUD (with its on-screen Menu button) isn't
+           drawn — so without this there is NO way back into a running game once
+           any menu is opened mid-match. Mirror hud_settings_keyboard's Escape
+           handler: return to the in-game hud, clear the exit-menu flag,
+           recapture the pointer. Connected-only (nothing to resume from the
+           disconnected main menu). NOTE: the sidebar superseded the old top
+           nav bar (hud_common_nav), which is where this button used to live —
+           if that function is ever revived or this sidebar is replaced again,
+           the Resume entry must move with it. */
+        if(network_connected) {
+                mu_text_color(ctx, 120, 230, 120);
+                if(mu_button(ctx, "Resume")) {
+                        hud_change(&hud_ingame);
+                        show_exit = 0;
+                        window_mousemode(WINDOW_CURSOR_DISABLED);
+                }
+                mu_text_color_default(ctx);
+        }
+#endif
+
         if(!network_connected)
                 hud_nav_button(ctx, &hud_serverlist, "Servers");
 
@@ -4029,9 +4202,18 @@ static void hud_common_nav(mu_Context* ctx, mu_Rect* frame, float scalex, float 
            label "Demos" and "Disconnect" for the label "Chat Log" (hence both
            rendering cramped). Build labels and widths from ONE list instead so
            they cannot disagree again. */
-        const char* labels[7];
-        float mults[7];
+        const char* labels[8];
+        float mults[8];
         int n = 0;
+#if defined(OS_IOS)
+        /* iOS has no Escape key, and while a menu is open the in-game HUD (with
+           its Menu button) isn't drawn — so without this there is NO on-screen
+           way back to the game once a menu is opened mid-match. Surface a
+           Resume button as the first nav entry, connected-only (no game to
+           resume from the disconnected main menu). The matching mu_button is
+           drawn first below; keep label list and draw order in sync. */
+        if(network_connected) { labels[n] = "Resume"; mults[n++] = 1.5F; }
+#endif
         if(!network_connected) { labels[n] = "Servers"; mults[n++] = 1.5F; }
         labels[n] = "Settings"; mults[n++] = 1.5F;
         labels[n] = "Controls"; mults[n++] = 1.5F;
@@ -4041,7 +4223,7 @@ static void hud_common_nav(mu_Context* ctx, mu_Rect* frame, float scalex, float 
         if(serverlist_is_outdated) { labels[n] = "New updates"; mults[n++] = 1.2F; }
         labels[n] = network_connected ? "Disconnect" : "Exit"; mults[n++] = 1.5F;
 
-        int raw[7], widths[8];
+        int raw[8], widths[9];
         int sum = 0;
         for(int k = 0; k < n; k++) {
                 raw[k] = ctx->text_width(ctx->style->font, (char*)labels[k], 0);
@@ -4067,6 +4249,21 @@ static void hud_common_nav(mu_Context* ctx, mu_Rect* frame, float scalex, float 
 
         widths[n] = -1;
         mu_layout_row(ctx, n + 1, widths, 0);
+
+#if defined(OS_IOS)
+        /* Resume — mirrors hud_settings_keyboard's Escape handler: drop back to
+           the in-game HUD, clear the exit-menu flag, recapture the pointer.
+           Connected-only so it lines up with the label added above. */
+        if(network_connected) {
+                mu_text_color(ctx, 120, 230, 120);
+                if(mu_button(ctx, "Resume")) {
+                        hud_change(&hud_ingame);
+                        show_exit = 0;
+                        window_mousemode(WINDOW_CURSOR_DISABLED);
+                }
+                mu_text_color_default(ctx);
+        }
+#endif
 
         if(!network_connected) {
                 hud_nav_button(ctx, &hud_serverlist, "Servers");

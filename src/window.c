@@ -24,6 +24,12 @@
 #include "common.h"
 #include "main.h"
 #include "window.h"
+
+/* SDL's real default framebuffer object, captured once in window_init(). 0 on
+   desktop/Android, but a non-zero EAGL FBO on iOS. See window_init() + main.c. */
+int window_gl_default_framebuffer = 0;
+static float mouse_scale_x = 1.0F, mouse_scale_y = 1.0F;
+
 #include "config.h"
 #include "hud.h"
 #include "camera.h"
@@ -513,6 +519,10 @@ void window_textinput(int allow) {
 		SDL_StopTextInput();
 }
 
+int window_textinput_active(void) {
+	return SDL_IsTextInputActive() ? 1 : 0;
+}
+
 void window_fromsettings() {
 	pending_multisamples = settings.multisamples;
 	pending_vsync = settings.vsync;
@@ -701,6 +711,20 @@ void window_init() {
 	SDL_SetHintWithPriority(SDL_HINT_MOUSE_TOUCH_EVENTS, "1", SDL_HINT_OVERRIDE);
 #endif
 
+#if defined(OS_IOS)
+	/* Hide the home indicator (value "2"). The real reason this is here isn't
+	   cosmetics: SDL's iOS view controller ties
+	   preferredScreenEdgesDeferringSystemGestures to this same hint, so hiding
+	   the indicator also tells UIKit to DEFER its bottom-edge system gesture.
+	   Without it, UIKit holds back any touch that STARTS in the bottom ~20pt
+	   strip for a few hundred ms to disambiguate it from a home-swipe — which
+	   is exactly why the Crouch/Jump plates (hard against the bottom edge) felt
+	   like they needed a long press before they "took". With the gesture
+	   deferred, the first touch is delivered to the app immediately and the
+	   buttons fire on contact. Must be set before window creation. */
+	SDL_SetHintWithPriority(SDL_HINT_IOS_HIDE_HOME_INDICATOR, "2", SDL_HINT_OVERRIDE);
+#endif
+
 	/* Landscape-only on Android: allow both landscape directions (180-degree
 	   flip) but never portrait. Must be set before SDL_CreateWindow; no effect
 	   on desktop. Pair with android:screenOrientation="sensorLandscape" in
@@ -731,7 +755,8 @@ retry_context:
 
 	hud_window->impl
 		= SDL_CreateWindow("KyroSpades " KYROSPADES_VERSION, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-						   settings.window_width, settings.window_height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+						   settings.window_width, settings.window_height,
+						   SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
 
 	SDL_GLContext ctx = SDL_GL_CreateContext(hud_window->impl);
 	if(!ctx) {
@@ -764,6 +789,44 @@ retry_context:
 		settings.window_width = drawable_w;
 		settings.window_height = drawable_h;
 		glViewport(0, 0, drawable_w, drawable_h);
+		int win_w = 0, win_h = 0;
+		SDL_GetWindowSize(hud_window->impl, &win_w, &win_h);
+		if(win_w > 0 && win_h > 0) {
+			mouse_scale_x = (float)drawable_w / (float)win_w;
+			mouse_scale_y = (float)drawable_h / (float)win_h;
+		}
+	}
+
+	/* Capture SDL's real default framebuffer.
+	   ──────────────────────────────────────────────────────────────────────
+	   Desktop/Android (EGL): the window's default FBO is object 0 and is
+	     bound right after CreateContext, so a single glGetIntegerv here gives
+	     the correct answer (0) and we're done.
+	   iOS (UIKit/EAGL): SDL creates a NON-zero EAGL viewFramebuffer LAZILY,
+	     during the first SDL_GL_SwapWindow. So at this point the query
+	     returns 0, which on iOS is *off-screen*. v12 captured this 0 and
+	     every later "return to screen" bound 0 → invisible game world.
+	     Force the lazy creation by performing one swap now, then re-query.
+	     The black frame is hidden behind iOS's launch image; nothing visible
+	     happens before the main loop renders the first real frame.
+	   We then keep a non-zero guard: window_update re-captures after every
+	   swap so the value tracks any FBO recreation (e.g. orientation change),
+	   but never overwrites with 0. */
+	{
+		GLint fb = -1;
+		glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fb);
+		log_info("FBO at CreateContext = %d, drawable = %dx%d", (int)fb, drawable_w, drawable_h);
+		if(fb > 0) window_gl_default_framebuffer = (int)fb;
+#if defined(OS_IOS)
+		/* Lazy-init kick: swap once to materialise SDL's viewFramebuffer. */
+		glClearColor(0.0F, 0.0F, 0.0F, 1.0F);
+		glClear(GL_COLOR_BUFFER_BIT);
+		SDL_GL_SwapWindow(hud_window->impl);
+		fb = -1;
+		glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fb);
+		log_info("FBO after forced initial swap = %d", (int)fb);
+		if(fb > 0) window_gl_default_framebuffer = (int)fb;
+#endif
 	}
 
 	memset(fingers, 0, sizeof(fingers));
@@ -773,16 +836,50 @@ static struct window_finger* aim_finger = NULL;
 static struct window_finger* aim_finger2 = NULL;
 
 static int window_aim_zone(float x, float y) {
-	/* Exclude the far-right action buttons (LMB/RMB). */
-	float bx = settings.window_width - settings.window_height * 0.075F;
-	if(x > bx - settings.window_height * 0.15F)
-		return 0;
+	/* Exclude the right-side action buttons — but only the ROWS they actually
+	   occupy, not the whole right column. The old full-height strip meant you
+	   could never start a camera drag from the lower-right corner (e.g. with a
+	   weapon held), which was the reported bug. In FPS the buttons are LMB
+	   (GL y 0.6H) and RMB (0.45H); in spectator it's the Cam toggle (0.3H).
+	   x,y are screen coords (y DOWN); gy converts to GL (y UP). */
+	if(x > settings.window_width - settings.window_height * 0.225F) {
+		float gy = settings.window_height - y;
+		if(camera_mode == CAMERAMODE_SPECTATOR) {
+			/* Cam (0.3H) AND the LMB/RMB plates (0.45H/0.6H): the plates are
+			   drawn and hit-tested in spectator too (RMB tap = cycle spectated
+			   player), so they must not be eaten by the aim zone. Contiguous
+			   band Cam bottom → LMB top. */
+			if(gy > settings.window_height * 0.225F && gy < settings.window_height * 0.675F)
+				return 0; /* Cam .. RMB .. LMB */
+		} else {
+			if(gy > settings.window_height * 0.375F && gy < settings.window_height * 0.675F)
+				return 0; /* RMB .. LMB */
+		}
+	}
 	/* Exclude the bottom-left movement joystick. */
 	if(x < settings.window_width * 0.35F && y > settings.window_height * 0.45F)
 		return 0;
 	/* Exclude the top menu bar. */
 	if(y < settings.window_height * 0.18F)
 		return 0;
+	/* Exclude the block-colour palette (bottom-right) ONLY while the block tool
+	   is held in FPS — that's when the grid is drawn and tappable. Any other
+	   time (other tools, spectator, dead) this corner is normal look space.
+	   Fractions mirror hud.c's palette_*() helpers — keep in sync. x,y are
+	   screen coords (y DOWN); the GL-space grid (y UP) is converted by
+	   subtracting from window_height. */
+	if(camera_mode == CAMERAMODE_FPS && players[local_player_id].held_item == TOOL_BLOCK) {
+		float psize = settings.window_height * 0.032F * 8.0F;
+		float pright = settings.window_width - settings.window_height * 0.025F;
+		float pbottom_gl = settings.window_height * 0.045F;
+		float ptop_sc = settings.window_height - (pbottom_gl + psize);
+		float pbot_sc = settings.window_height - pbottom_gl;
+		/* Right bound extended to the screen edge so the rightmost column's
+		   catch zone (which the hud hit-test also extends to the edge) is kept
+		   out of the camera-look zone. */
+		if(x >= pright - psize && x <= settings.window_width && y >= ptop_sc && y <= pbot_sc)
+			return 0;
+	}
 	return 1;
 }
 
@@ -794,6 +891,28 @@ void window_deinit() {
 static int quit = 0;
 void window_update() {
 	SDL_GL_SwapWindow(hud_window->impl);
+
+#if defined(OS_IOS)
+	/* SDL's iOS GL backend calls bindBackbuffer inside SwapWindow, which
+	   re-binds viewFramebuffer to GL_FRAMEBUFFER. This is THE most reliable
+	   moment in the frame to read SDL's current default FBO id: state at
+	   the top of display() can drift (rotation, layer resize, multitasking
+	   restore) and v12's capture inside the render block was empirically
+	   not reliable enough to fix the off-screen-render bug.
+	   Non-zero guard: if for any reason this read returns 0, KEEP the last
+	   good value — binding 0 on iOS is off-screen. */
+	{
+		GLint fb = -1;
+		glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fb);
+		if(fb > 0 && fb != window_gl_default_framebuffer) {
+			log_info("default FBO id changed: %d -> %d",
+					 window_gl_default_framebuffer, (int)fb);
+			window_gl_default_framebuffer = (int)fb;
+		} else if(fb > 0) {
+			window_gl_default_framebuffer = (int)fb;
+		}
+	}
+#endif
 
 	/* Reshape from the real drawable if it drifted from the framebuffer
 	   (fullscreen toggle / orientation change) so the viewport and HUD agree. */
@@ -848,9 +967,13 @@ void window_update() {
 					/* data1/data2 are window coordinates; reshape from the
 					   drawable pixels, which differ on HighDPI / Android. */
 					int dw = 0, dh = 0;
-					SDL_GL_GetDrawableSize(hud_window->impl, &dw, &dh);
-					if(dw <= 0 || dh <= 0) { dw = event.window.data1; dh = event.window.data2; }
-					reshape(hud_window, dw, dh);
+				SDL_GL_GetDrawableSize(hud_window->impl, &dw, &dh);
+				if(dw <= 0 || dh <= 0) { dw = event.window.data1; dh = event.window.data2; }
+				if(event.window.data1 > 0 && event.window.data2 > 0) {
+					mouse_scale_x = (float)dw / (float)event.window.data1;
+					mouse_scale_y = (float)dh / (float)event.window.data2;
+				}
+				reshape(hud_window, dw, dh);
 				}
 				break;
 			case SDL_MOUSEWHEEL:
@@ -860,11 +983,11 @@ void window_update() {
 				if(event.motion.which == SDL_TOUCH_MOUSEID && hud_active == &hud_ingame) break; /* drop touch-synth only ingame */
 				if(SDL_GetRelativeMouseMode()) {
 					static int x, y;
-					x += event.motion.xrel;
-					y += event.motion.yrel;
+					x += (int)(event.motion.xrel * mouse_scale_x);
+					y += (int)(event.motion.yrel * mouse_scale_y);
 					mouse(hud_window, x, y);
 				} else {
-					mouse(hud_window, event.motion.x, event.motion.y);
+					mouse(hud_window, event.motion.x * mouse_scale_x, event.motion.y * mouse_scale_y);
 				}
 				break;
 			}
@@ -1092,18 +1215,20 @@ void window_open_url(const char* url) {
 		log_warn("window_open_url: refused unsafe URL");
 		return;
 	}
-#ifdef __ANDROID__
-	/* There is no shell/xdg-open on Android; SDL routes this through an
-	   ACTION_VIEW intent, which opens the user's default browser. */
+#if defined(__ANDROID__) || defined(OS_IOS)
+	/* Neither Android nor iOS has a shell/xdg-open, and system() is
+	   unavailable on iOS entirely. SDL routes this through the platform's
+	   native "open URL" mechanism (ACTION_VIEW intent / UIApplication
+	   openURL), which hands off to the default browser. This branch must be
+	   chained (#elif/#else) with the others so the system() call below is
+	   removed by the preprocessor here, not merely skipped at runtime. */
 #if SDL_VERSION_ATLEAST(2, 0, 14)
 	if(SDL_OpenURL(url) != 0)
 		log_warn("window_open_url: SDL_OpenURL failed: %s", SDL_GetError());
 #else
 	log_warn("window_open_url: SDL too old for SDL_OpenURL");
 #endif
-	return;
-#endif
-#ifdef OS_WINDOWS
+#elif defined(OS_WINDOWS)
 	ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
 #else
 	char cmd[1152];

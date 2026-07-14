@@ -25,8 +25,20 @@
 #include <GL/glew.h>
 #else
 #ifdef USE_SDL
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+/* iOS ships GL ES under the OpenGLES framework with different header paths
+   than the Khronos/Android layout used everywhere else. */
+#include <OpenGLES/ES1/gl.h>
+#include <OpenGLES/ES1/glext.h>
+#include <OpenGLES/ES2/gl.h>
+#include <OpenGLES/ES2/glext.h>
+#else
 #include <GLES/gl.h>    /* ES 1.x — types, constants, function declarations */
 #include <GLES2/gl2.h>  /* ES 2.0 — FBOs, shaders */
+#endif
 #endif
 /* Compatibility shims */
 #define glOrtho(l, r, b, t, n, f)     glOrthof((float)(l), (float)(r), (float)(b), (float)(t), (float)(n), (float)(f))
@@ -53,7 +65,16 @@
 #endif
 
 #ifdef USE_SDL
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+/* On iOS SDL must own main() so it can start the UIKit run loop via its
+   SDL2main shim. Defining SDL_MAIN_HANDLED there would skip that bootstrap and
+   the app would launch to a black screen with no error. Every other platform
+   keeps the existing manual-main behaviour. */
+#if !(defined(__APPLE__) && TARGET_OS_IPHONE)
 #define SDL_MAIN_HANDLED
+#endif
 #include <SDL2/SDL.h>
 #endif
 
@@ -63,6 +84,9 @@
 
 #ifdef _WIN32
 #define OS_WINDOWS
+#include <sys/stat.h>
+#include <stdint.h>
+#include <direct.h>
 #endif
 
 #ifdef __linux__
@@ -72,10 +96,26 @@
 
 #ifdef __APPLE__
 #define OS_APPLE
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#define OS_IOS
+#endif
 #endif
 
 #ifdef __HAIKU__
 #define OS_HAIKU
+#endif
+
+/* Portable directory creation. POSIX mkdir() takes a mode; Windows _mkdir()
+   does not. This wrapper takes the mode everywhere and ignores it on Windows,
+   so call sites stay uniform: ks_mkdir(path, 0755). Replaces the old CI-time
+   sed patch that rewrote mkdir() calls on Windows builds. (file.c does its own
+   #ifdef split for mkdir and deliberately does NOT use this.) */
+#ifdef _WIN32
+static inline int ks_mkdir(const char* path, int mode) { (void)mode; return _mkdir(path); }
+#else
+#include <sys/stat.h>
+static inline int ks_mkdir(const char* path, int mode) { return mkdir(path, mode); }
 #endif
 
 #ifndef min

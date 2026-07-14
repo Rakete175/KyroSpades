@@ -21,10 +21,17 @@
 #define SOUND_H
 
 #ifdef USE_SOUND
-#if __APPLE__
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+/* macOS desktop: Apple's system OpenAL framework. */
 #include <OpenAL/al.h>
 #include <OpenAL/alc.h>
 #else
+/* iOS (openal-soft static), Linux, Android, Windows: use the AL/ header
+   layout. Apple's iOS OpenAL framework is deprecated and we ship openal-soft
+   instead, so we must use its headers here to match the library we link. */
 #include <AL/al.h>
 #include <AL/alc.h>
 #endif

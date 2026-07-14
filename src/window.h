@@ -141,9 +141,16 @@ struct window_finger {
 
 extern int window_pressed_keys[64];
 
+/* SDL's real default framebuffer (0 on desktop/Android, non-zero on iOS). */
+extern int window_gl_default_framebuffer;
+
 #define WINDOW_NOMOUSELOC -1
 
 void window_textinput(int allow);
+/* Whether the on-screen/software keyboard text input is currently active.
+   Used by the iOS chat UI to label its Hide/Show keyboard toggle. Returns 0
+   on platforms without a soft keyboard. */
+int window_textinput_active(void);
 float window_time(void);
 void window_keyname(int keycode, char* output, size_t length);
 const char* window_clipboard(void);

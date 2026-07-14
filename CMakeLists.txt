@@ -33,6 +33,16 @@ if(NOT ENABLE_SDL AND NOT ENABLE_GLFW)
         message(FATAL_ERROR "Enable SDL or GLFW")
 endif()
 
+# iOS (CMAKE_SYSTEM_NAME=iOS sets both APPLE and IOS). It is GL ES + touch only
+# and must use the SDL backend, so pin those regardless of the defaults above.
+if(IOS)
+        set(ENABLE_SDL      ON  CACHE BOOL "" FORCE)
+        set(ENABLE_GLFW     OFF CACHE BOOL "" FORCE)
+        set(ENABLE_OPENGLES ON  CACHE BOOL "" FORCE)
+        set(ENABLE_TOUCH    ON  CACHE BOOL "" FORCE)
+        message(STATUS "iOS detected: SDL + GLES + touch")
+endif()
+
 message(STATUS "Compiler is ${CMAKE_CXX_COMPILER_ID}")
 message(STATUS "Build type is ${CMAKE_BUILD_TYPE}")
 
