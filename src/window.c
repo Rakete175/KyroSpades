@@ -753,10 +753,19 @@ retry_context:
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
 #endif
 
+	/* ALLOW_HIGHDPI is needed on iOS/Android where the native pixel density is
+	   part of the expected UX. On macOS desktop it makes the framebuffer 2x
+	   (Retina) while the UI was designed for logical points, so everything
+	   renders at half size and mouse coords are off. Let macOS scale for us. */
+	Uint32 win_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
+#if defined(__ANDROID__) || defined(OS_IOS)
+	win_flags |= SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
+
 	hud_window->impl
 		= SDL_CreateWindow("KyroSpades " KYROSPADES_VERSION, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
 						   settings.window_width, settings.window_height,
-						   SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+						   win_flags);
 
 	SDL_GLContext ctx = SDL_GL_CreateContext(hud_window->impl);
 	if(!ctx) {

@@ -362,25 +362,29 @@ jobs:
           mkdir -p "$APP/MacOS" "$APP/Frameworks" "$APP/Resources"
           cp KyroSpades/client "$APP/MacOS/KyroSpades"
           cp KyroSpades/lib/*.dylib "$APP/Frameworks/" 2>/dev/null || true
-          # Copy every runtime directory the game loads via relative paths.
-          # bsresources.zip was already extracted by CMake into kv6/ png/ wav/ etc.
-          for d in kv6 png wav fonts resources; do
+          # kv6/ png/ wav/ come from bsresources.zip extraction in the build dir.
+          # fonts/ and resources/ live in the source tree, not the build dir.
+          for d in kv6 png wav; do
             [ -d "KyroSpades/$d" ] && cp -r "KyroSpades/$d" "$APP/Resources/$d"
           done
-          [ -f "KyroSpades/config.ini" ] && cp "KyroSpades/config.ini" "$APP/Resources/"
+          [ -d "fonts" ] && cp -r "fonts" "$APP/Resources/fonts"
+          [ -d "resources" ] && cp -r "resources" "$APP/Resources/resources"
 
-          # Generate .icns from icon.png
-          if [ -f "$APP/Resources/resources/icon.png" ]; then
+          # Generate .icns from icon.png (lives in the source tree, not build dir)
+          ICON_SRC="resources/icon.png"
+          if [ -f "$ICON_SRC" ]; then
             ICONSET="$APP/Resources/KyroSpades.iconset"
             mkdir -p "$ICONSET"
             for sz in 16 32 128 256 512; do
-              sips -z $sz $sz "$APP/Resources/resources/icon.png" --out "$ICONSET/icon_${sz}x${sz}.png" >/dev/null
+              sips -z $sz $sz "$ICON_SRC" --out "$ICONSET/icon_${sz}x${sz}.png" >/dev/null
               d=$((sz * 2))
-              sips -z $d $d "$APP/Resources/resources/icon.png" --out "$ICONSET/icon_${sz}x${sz}@2x.png" >/dev/null
+              sips -z $d $d "$ICON_SRC" --out "$ICONSET/icon_${sz}x${sz}@2x.png" >/dev/null
             done
             iconutil -c icns "$ICONSET" -o "$APP/Resources/KyroSpades.icns"
             rm -rf "$ICONSET"
           fi
+          # Copy source-tree resources not present in the build dir
+          [ -f "resources/config.ini" ] && cp "resources/config.ini" "$APP/Resources/"
 
           cat > "$APP/Info.plist" << 'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
