@@ -158,9 +158,10 @@ static uint32_t water_seabed_color(int wx, int wz) {
 }
 
 static uint32_t water_cell_compute(int x, int z, int wx, int wz) {
-        /* When water shader is OFF, skip the expensive reflection raycast
-           and use the original water color computation (unchanged). */
-        if(!settings.water_shader) {
+        /* When water shader is OFF (or Performance Mode is ON), skip the
+           expensive reflection raycast and use the original water color
+           computation (unchanged). */
+        if(!settings.water_shader || settings.performance_mode) {
                 uint32_t wc = water_seabed_color(wx, wz);
                 float h = cell_hash(wx, wz);
                 float shimmer = 0.85F + 0.22F * h + 0.08F * sinf(wr.job.time * (0.6F + h) + h * 6.2831F);

@@ -934,7 +934,7 @@ static inline void hud_common_render(mu_Context* ctx) {
 }
 
 static inline void hud_texture_draw(struct texture* t, float x, float y, float w, float h) {
-        if(settings.hud_shadows) {
+        if(settings.hud_shadows && !settings.performance_mode) {
                 texture_draw_shadow(t, x, y, w, h);
         } else {
                 texture_draw(t, x, y, w, h);
@@ -942,7 +942,7 @@ static inline void hud_texture_draw(struct texture* t, float x, float y, float w
 }
 
 static inline void hud_font_render(float x, float y, float h, char* text, float a) {
-        if(settings.hud_shadows) {
+        if(settings.hud_shadows && !settings.performance_mode) {
                 font_render_shadow(x, y, h, text, a);
         } else {
                 font_render(x, y, h, text);
@@ -962,7 +962,7 @@ static inline void hud_font_render_outlined(float x, float y, float h, char* tex
 }
 
 static inline void hud_font_render_centered(float x, float y, float h, char* text, float a) {
-        if(settings.hud_shadows) {
+        if(settings.hud_shadows && !settings.performance_mode) {
                 font_centered_shadow(x, y, h, text, a);
         } else {
                 font_centered(x, y, h, text);
@@ -5028,7 +5028,8 @@ static void hud_settings_render(mu_Context* ctx, float scalex, float scaley) {
                         || settings.greedy_meshing != settings_tmp.greedy_meshing
                         || settings.ao_multiplier != settings_tmp.ao_multiplier
                         || settings.shadow_quality != settings_tmp.shadow_quality
-                        || settings.shadow_intensity != settings_tmp.shadow_intensity;
+                        || settings.shadow_intensity != settings_tmp.shadow_intensity
+                        || settings.performance_mode != settings_tmp.performance_mode;
                 memcpy(&settings, &settings_tmp, sizeof(struct RENDER_OPTIONS));
                 window_fromsettings();
                 sound_volume(settings.volume / 10.0F);

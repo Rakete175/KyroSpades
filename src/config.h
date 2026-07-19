@@ -132,6 +132,12 @@ extern struct RENDER_OPTIONS {
         int replay_duration;
         int replay_save_hotkey;
         char audio_monitor_source[64];
+        /* Master switch for insane-FPS mode. When ON, heavy visual effects
+           (postproc, water shader, AO, shadows, particles, etc.) are force-
+           disabled at the consumption sites — the user's saved values for
+           those settings are NOT modified, so toggling performance_mode off
+           restores them instantly. */
+        int performance_mode;
 } settings, settings_tmp;
 
 extern struct list config_keys;

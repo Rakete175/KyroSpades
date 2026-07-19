@@ -339,6 +339,9 @@ void particle_render() {
 }
 
 void particle_create_casing(struct Player* p) {
+        /* Performance Mode: skip bullet casing ejection entirely. */
+        if(settings.performance_mode)
+                return;
         entitysys_add(&particles,
                                   &(struct Particle) {
                                           .size = 0.1F,
@@ -360,6 +363,10 @@ void particle_create_casing(struct Player* p) {
 
 void particle_create(unsigned int color, float x, float y, float z, float velocity, float velocity_y, int amount,
                                          float min_size, float max_size) {
+        /* Performance Mode: skip blood/debris/etc. particle creation entirely.
+           Existing in-flight particles continue to render until they die. */
+        if(settings.performance_mode)
+                return;
         for(int k = 0; k < amount; k++) {
                 float vx = (((float)rand() / (float)RAND_MAX) * 2.0F - 1.0F);
                 float vy = (((float)rand() / (float)RAND_MAX) * 2.0F - 1.0F);
@@ -388,6 +395,9 @@ void particle_create(unsigned int color, float x, float y, float z, float veloci
 }
 
 void particle_create_rain(void) {
+        /* Performance Mode: skip rain particle spawning entirely. */
+        if(settings.performance_mode)
+                return;
         rain_timer += 0.016F;
         if(rain_timer < 0.05F) {
                 return;
@@ -464,6 +474,9 @@ void particle_create_rain(void) {
 }
 
 void particle_create_snow(void) {
+        /* Performance Mode: skip snow particle spawning entirely. */
+        if(settings.performance_mode)
+                return;
         snow_timer += 0.016F;
         if(snow_timer < 0.05F) {
                 return;

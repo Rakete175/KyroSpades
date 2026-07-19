@@ -446,6 +446,13 @@ static bool falling_blocks_update(void* obj, void* user) {
 }
 
 void map_collapsing_update(float dt) {
+        /* Performance Mode: skip collapsing-structure physics simulation.
+           Existing collapsing structures freeze in place; new collapses
+           still remove blocks (handled elsewhere) but don't spawn falling
+           debris entities. The flood-fill physics loop is one of the
+           heavier per-frame CPU costs in destructed maps. */
+        if(settings.performance_mode)
+                return;
         size_t drain = channel_size(&map_result_queue);
 
         for(size_t k = 0; k < drain; k++) {

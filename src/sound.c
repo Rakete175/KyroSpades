@@ -608,7 +608,12 @@ void sound_update() {
         alListenerfv(AL_ORIENTATION, orientation);
 
         if(efx_ok) {
-                sound_room_probe();
+                /* Performance Mode: skip the per-frame EFX reverb probe
+                   (raycasts around the listener to estimate room size).
+                   Only run the cheaper sound_room_apply at 10 Hz so reverb
+                   doesn't completely vanish, but skip the probe entirely. */
+                if(!settings.performance_mode)
+                        sound_room_probe();
                 /* integrating 128 samples + 9 effect params every frame is
                  * pointless; 10 Hz is plenty for a room that changes as you walk */
                 if((sound_frame % 6) == 0)

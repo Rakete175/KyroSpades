@@ -1367,6 +1367,13 @@ int recorder_save_replay(void) {
    ══════════════════════════════════════════════════════════════════════ */
 
 void recorder_capture_frame(void) {
+    /* Performance Mode: skip the rolling replay buffer's per-frame
+       glReadPixels + malloc(W*H*4) + thread push. This is one of the
+       heaviest per-frame GPU→CPU stalls when replay_enabled is on.
+       Manual F7 recording (rec_running) is still honored so the user
+       can record on demand. */
+    if(settings.performance_mode && !rec_running)
+        return;
     if(!rec_running && !buf_running)
         return;
 
