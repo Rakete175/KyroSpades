@@ -119,6 +119,39 @@ void texture_flag_offset(int index, float* u, float* v) {
         }
 }
 
+#ifndef GL_TEXTURE_MAX_ANISOTROPY_EXT
+#define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
+#endif
+#ifndef GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT
+#define GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT 0x84FF
+#endif
+
+/* performance_mode forces greedy meshing (fewer, larger quads spanning many
+   world-units), which makes texture minification much more aggressive at
+   distance than with per-block quads. Without mipmaps + anisotropic
+   filtering that shows up as harsh aliasing/shimmer on the merged faces.
+   Bound to performance_mode only (no separate settings entry) since it's
+   compensating for an artifact that performance_mode itself introduces. */
+static void texture_apply_performance_filtering(struct texture* t) {
+        if(!settings.performance_mode)
+                return;
+
+        const char* ext = (const char*)glGetString(GL_EXTENSIONS);
+        int has_aniso = ext && strstr(ext, "GL_EXT_texture_filter_anisotropic") != NULL;
+
+        glBindTexture(GL_TEXTURE_2D, t->texture_id);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+        if(has_aniso) {
+                float max_aniso = 1.0F;
+                glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &max_aniso);
+                glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, min(max_aniso, 4.0F));
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+}
+
 void texture_filter(struct texture* t, int filter) {
         glBindTexture(GL_TEXTURE_2D, t->texture_id);
         switch(filter) {
@@ -536,6 +569,7 @@ void texture_init() {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glBindTexture(GL_TEXTURE_2D, 0);
+        texture_apply_performance_filtering(&texture_blocks);
         texture_create(&texture_grenade, "png/grenade.png");
         texture_create(&texture_ammo_semi, "png/semiammo.png");
         texture_create(&texture_ammo_smg, "png/smgammo.png");

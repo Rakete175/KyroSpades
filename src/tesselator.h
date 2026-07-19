@@ -24,11 +24,12 @@
 
 #include "glx.h"
 
-#ifdef OPENGL_ES
+/* Desktop used to tesselate into raw quads and draw with GL_QUADS, which is
+   removed in core profiles/GLES and slow to rasterize on modern drivers.
+   The ES path already expanded each quad into 2 triangles at insert time;
+   reusing that path on desktop means one code path, one vertex layout, and
+   a plain GL_TRIANGLES draw everywhere. */
 #define TESSELATE_TRIANGLES
-#else
-#define TESSELATE_QUADS
-#endif
 
 enum tesselator_vertex_type {
         VERTEX_INT,

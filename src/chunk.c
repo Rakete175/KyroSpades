@@ -287,12 +287,31 @@ void* chunk_generate(void* data) {
         return NULL;
 }
 
+/* Meshing runs on worker threads, once per dirty chunk. checked_voxels2 used
+   to be a VLA sized by the runtime map height, freshly (re)allocated on the
+   stack on every single call. Reusing one thread-local heap buffer per
+   worker, grown only when the map height actually grows, avoids that
+   per-mesh stack churn without touching the meshing logic below. */
+static _Thread_local int* chunk_scratch_voxels2 = NULL;
+static _Thread_local size_t chunk_scratch_voxels2_cap = 0;
+
+static int* chunk_get_scratch_voxels2(size_t needed_per_plane) {
+        size_t needed = needed_per_plane * 2;
+        if(needed > chunk_scratch_voxels2_cap) {
+                chunk_scratch_voxels2 = realloc(chunk_scratch_voxels2, needed * sizeof(int));
+                CHECK_ALLOCATION_ERROR(chunk_scratch_voxels2)
+                chunk_scratch_voxels2_cap = needed;
+        }
+        return chunk_scratch_voxels2;
+}
+
 void chunk_generate_greedy(struct libvxl_chunk_copy* blocks, size_t start_x, size_t start_z, struct tesselator* tess,
                                                    int* max_height) {
         *max_height = 0;
 
         int checked_voxels[2][CHUNK_SIZE * CHUNK_SIZE];
-        int checked_voxels2[2][CHUNK_SIZE * map_size_y];
+        int* checked_voxels2_flat = chunk_get_scratch_voxels2(CHUNK_SIZE * map_size_y);
+        int (*checked_voxels2)[CHUNK_SIZE * map_size_y] = (int (*)[CHUNK_SIZE * map_size_y])checked_voxels2_flat;
 
         for(int z = start_z; z < start_z + CHUNK_SIZE; z++) {
                 memset(checked_voxels2[0], 0, sizeof(int) * CHUNK_SIZE * map_size_y);

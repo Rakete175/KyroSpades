@@ -1463,9 +1463,11 @@ void display() {
                                                         glx_draw_screen_quad();
                                                 } else {
 #else
-                                                glBegin(GL_QUADS);
+                                                glBegin(GL_TRIANGLES);
                                                 glTexCoord2f(0.0F, 0.0F); glVertex2f(0.0F, 0.0F);
                                                 glTexCoord2f(1.0F, 0.0F); glVertex2f((float)settings.window_width, 0.0F);
+                                                glTexCoord2f(1.0F, 1.0F); glVertex2f((float)settings.window_width, (float)settings.window_height);
+                                                glTexCoord2f(0.0F, 0.0F); glVertex2f(0.0F, 0.0F);
                                                 glTexCoord2f(1.0F, 1.0F); glVertex2f((float)settings.window_width, (float)settings.window_height);
                                                 glTexCoord2f(0.0F, 1.0F); glVertex2f(0.0F, (float)settings.window_height);
                                                 glEnd();
@@ -1539,9 +1541,11 @@ void display() {
                                                 glx_draw_screen_quad();
                                         } else {
 #else
-                                        glBegin(GL_QUADS);
+                                        glBegin(GL_TRIANGLES);
                                         glTexCoord2f(0.0F, 0.0F); glVertex2f(0.0F, 0.0F);
                                         glTexCoord2f(1.0F, 0.0F); glVertex2f((float)settings.window_width, 0.0F);
+                                        glTexCoord2f(1.0F, 1.0F); glVertex2f((float)settings.window_width, (float)settings.window_height);
+                                        glTexCoord2f(0.0F, 0.0F); glVertex2f(0.0F, 0.0F);
                                         glTexCoord2f(1.0F, 1.0F); glVertex2f((float)settings.window_width, (float)settings.window_height);
                                         glTexCoord2f(0.0F, 1.0F); glVertex2f(0.0F, (float)settings.window_height);
                                         glEnd();
@@ -1593,9 +1597,11 @@ void display() {
                                                 glx_draw_screen_quad();
                                         } else {
 #else
-                                        glBegin(GL_QUADS);
+                                        glBegin(GL_TRIANGLES);
                                         glTexCoord2f(0.0F, 0.0F); glVertex2f(0.0F, 0.0F);
                                         glTexCoord2f(1.0F, 0.0F); glVertex2f((float)settings.window_width, 0.0F);
+                                        glTexCoord2f(1.0F, 1.0F); glVertex2f((float)settings.window_width, (float)settings.window_height);
+                                        glTexCoord2f(0.0F, 0.0F); glVertex2f(0.0F, 0.0F);
                                         glTexCoord2f(1.0F, 1.0F); glVertex2f((float)settings.window_width, (float)settings.window_height);
                                         glTexCoord2f(0.0F, 1.0F); glVertex2f(0.0F, (float)settings.window_height);
                                         glEnd();

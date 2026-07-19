@@ -320,7 +320,7 @@ void glx_displaylist_update(struct glx_displaylist* x, size_t size, int type, vo
                                 glNormalPointer(GL_BYTE, 0, normal);
                         if(x->has_texcoord)
                                 glTexCoordPointer(2, GL_FLOAT, 0, texcoord);
-                        glDrawArrays((type == GLX_DISPLAYLIST_POINTS) ? GL_POINTS : GL_QUADS, 0, x->size);
+                        glDrawArrays((type == GLX_DISPLAYLIST_POINTS) ? GL_POINTS : GL_TRIANGLES, 0, x->size);
                 }
                 glEndList();
 
@@ -487,11 +487,10 @@ void glx_displaylist_draw(struct glx_displaylist* x, int type) {
                         if(type == GLX_DISPLAYLIST_POINTS) {
                                 glDrawArrays(GL_POINTS, 0, x->size);
                         } else {
-#ifdef OPENGL_ES
+                                /* x->size already counts triangle-expanded vertices
+                                   (tesselator always emits 6 verts/quad now), same on
+                                   desktop and ES — one draw call, no GL_QUADS. */
                                 glDrawArrays(GL_TRIANGLES, 0, x->size);
-#else
-                                glDrawArrays(GL_QUADS, 0, x->size);
-#endif
                         }
 
                         if(x->has_texcoord)
@@ -647,11 +646,13 @@ void glx_draw_quad_2d(float x, float y, float w, float h) {
                 glEnable(GL_TEXTURE_2D);
         }
 #else
-        glBegin(GL_QUADS);
+        glBegin(GL_TRIANGLES);
         glVertex2f(x, y);
-        glVertex2f(x + w, y);
-        glVertex2f(x + w, y - h);
         glVertex2f(x, y - h);
+        glVertex2f(x + w, y - h);
+        glVertex2f(x, y);
+        glVertex2f(x + w, y - h);
+        glVertex2f(x + w, y);
         glEnd();
 #endif
 }
@@ -725,10 +726,15 @@ void glx_draw_gradient_quad_2d(float x, float y, float w, float h, float r1, flo
         glDisableClientState(GL_COLOR_ARRAY);
         glEnable(GL_TEXTURE_2D);
 #else
-        glBegin(GL_QUADS);
+        glBegin(GL_TRIANGLES);
         glColor3f(r1, g1, b1);
         glVertex2f(x, y);
         glVertex2f(x + w, y);
+        glColor3f(r2, g2, b2);
+        glVertex2f(x + w, y - h);
+
+        glColor3f(r1, g1, b1);
+        glVertex2f(x, y);
         glColor3f(r2, g2, b2);
         glVertex2f(x + w, y - h);
         glVertex2f(x, y - h);
