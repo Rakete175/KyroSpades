@@ -362,16 +362,27 @@ jobs:
           mkdir -p "$APP/MacOS" "$APP/Frameworks" "$APP/Resources"
           cp KyroSpades/client "$APP/MacOS/KyroSpades"
           cp KyroSpades/lib/*.dylib "$APP/Frameworks/" 2>/dev/null || true
-          # kv6/ png/ wav/ come from bsresources.zip extraction in the build dir.
-          # fonts/ and resources/ live in the source tree, not the build dir.
-          for d in kv6 png wav; do
-            [ -d "KyroSpades/$d" ] && cp -r "KyroSpades/$d" "$APP/Resources/$d"
-          done
-          [ -d "fonts" ] && cp -r "fonts" "$APP/Resources/fonts"
-          [ -d "resources" ] && cp -r "resources" "$APP/Resources/resources"
 
-          # Generate .icns from icon.png (lives in the source tree, not build dir)
-          ICON_SRC="resources/icon.png"
+          # build/KyroSpades is the fully-assembled desktop payload: the CMake
+          # post-build copy drops resources/ (config.ini, icon.png, fonts/, ...)
+          # in here and bsresources.zip is extracted alongside it (kv6/ png/
+          # wav/). Mirror that ENTIRE payload into Resources/ — everything except
+          # the executable and the dylibs, which live in MacOS/ and Frameworks/.
+          # (The old per-item copy looked for resources/ and fonts/ relative to
+          # build/, where they don't exist, so config.ini and the icon were
+          # silently dropped: the app then aborted at launch with
+          #   FATAL file.c: ERROR: failed to open 'config.ini', exiting
+          # and shipped without an icon.) On first launch main() stages
+          # Resources/ into the writable prefs dir and chdirs there, so these
+          # relative paths resolve exactly like the folder build.
+          for entry in KyroSpades/*; do
+            base=$(basename "$entry")
+            case "$base" in client|lib) continue ;; esac
+            cp -R "$entry" "$APP/Resources/"
+          done
+
+          # Generate .icns from the icon.png we just bundled.
+          ICON_SRC="$APP/Resources/icon.png"
           if [ -f "$ICON_SRC" ]; then
             ICONSET="$APP/Resources/KyroSpades.iconset"
             mkdir -p "$ICONSET"
@@ -382,9 +393,16 @@ jobs:
             done
             iconutil -c icns "$ICONSET" -o "$APP/Resources/KyroSpades.icns"
             rm -rf "$ICONSET"
+          else
+            echo "::error::icon.png missing from payload — .app would ship without an icon"
+            exit 1
           fi
-          # Copy source-tree resources not present in the build dir
-          [ -f "resources/config.ini" ] && cp "resources/config.ini" "$APP/Resources/"
+          # Fail loudly if the file whose absence crashes the client didn't make
+          # it into the bundle, instead of shipping a broken .app.
+          if [ ! -f "$APP/Resources/config.ini" ]; then
+            echo "::error::config.ini missing from bundle — the .app would crash at launch"
+            exit 1
+          fi
 
           cat > "$APP/Info.plist" << 'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>

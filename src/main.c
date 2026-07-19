@@ -1908,6 +1908,25 @@ void keys(struct window_instance* window, int key, int scancode, int action, int
                         if(clipboard)
                                 mu_input_text(hud_active->ctx, clipboard);
                 }
+
+                /* Editing shortcuts for menu textboxes (aos:// bar, name/rename
+                   fields, ...) so they behave like the in-game chat: CMD/CTRL+A
+                   select-all, +C copy, +X cut. Paste (+V) is handled above.
+                   `mods` is non-zero when CTRL or GUI(CMD) is held, so the same
+                   binding works on macOS and elsewhere. On the SDL desktop
+                   builds the raw keysym is passed in via `scancode`; A and X have
+                   no dedicated WINDOW_KEY_*, so we key off the sym directly.
+                   mu_input_keydown OR-accumulates per frame, so it's safe even
+                   though keys() may fire more than once for one physical key. */
+                if(action == WINDOW_PRESS && mods) {
+#ifdef USE_SDL
+                        switch(scancode) {
+                                case SDLK_a: mu_input_keydown(hud_active->ctx, MU_KEY_SELECTALL); break;
+                                case SDLK_c: mu_input_keydown(hud_active->ctx, MU_KEY_COPY); break;
+                                case SDLK_x: mu_input_keydown(hud_active->ctx, MU_KEY_CUT); break;
+                        }
+#endif
+                }
         }
 
         if(action == WINDOW_PRESS) {

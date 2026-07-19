@@ -271,6 +271,7 @@ void hud_change(struct hud* new) {
                 mu_init(hud_active->ctx);
                 hud_active->ctx->text_width = mu_text_width;
                 hud_active->ctx->text_height = mu_text_height;
+                hud_active->ctx->set_clipboard = window_setclipboard;
                 hud_active->ctx->style->colors[MU_COLOR_BASE] = mu_accent_color(0.3F, 255);
                 hud_active->ctx->style->colors[MU_COLOR_BORDER] = mu_accent_color(0.8F, 255);
                 hud_active->ctx->style->colors[MU_COLOR_BUTTON] = mu_accent_color(0.3F, 255);

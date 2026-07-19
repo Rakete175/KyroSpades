@@ -102,7 +102,14 @@ enum {
   MU_KEY_CTRL         = (1 << 1),
   MU_KEY_ALT          = (1 << 2),
   MU_KEY_BACKSPACE    = (1 << 3),
-  MU_KEY_RETURN       = (1 << 4)
+  MU_KEY_RETURN       = (1 << 4),
+  /* Clipboard / selection shortcuts fed from the platform layer (CMD/CTRL+A,
+     +C, +X). microui textboxes have no cursor model, so "select all" here is a
+     whole-field selection: the next typed char or paste replaces everything,
+     backspace/delete clears it, and copy/cut act on the whole field. */
+  MU_KEY_SELECTALL    = (1 << 5),
+  MU_KEY_COPY         = (1 << 6),
+  MU_KEY_CUT          = (1 << 7)
 };
 
 
@@ -174,6 +181,10 @@ struct mu_Context {
   int (*text_width)(mu_Font font, const char *str, int len);
   int (*text_height)(mu_Font font);
   void (*draw_frame)(mu_Context *ctx, mu_Rect rect, int colorid);
+  /* Optional: write a string to the system clipboard (for copy/cut). May be
+     NULL, in which case copy/cut are no-ops. Paste is driven from the platform
+     layer via mu_input_text(), so no read callback is needed here. */
+  void (*set_clipboard)(const char *text);
   /* core state */
   mu_Style _style;
   mu_Style *style;
@@ -189,6 +200,9 @@ struct mu_Context {
   mu_Container *scroll_target;
   char number_edit_buf[MU_MAX_FMT];
   mu_Id number_edit;
+  /* Which textbox (if any) currently has its whole contents "selected" via
+     CMD/CTRL+A. Reset on focus change or once the selection is consumed. */
+  mu_Id textbox_selectall;
   /* stacks */
   mu_stack(char, MU_COMMANDLIST_SIZE) command_list;
   mu_stack(mu_Container*, MU_ROOTLIST_SIZE) root_list;

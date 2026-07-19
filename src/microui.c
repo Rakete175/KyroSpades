@@ -421,9 +421,19 @@ void mu_input_keyup(mu_Context *ctx, int key) {
 
 void mu_input_text(mu_Context *ctx, const char *text) {
   int len = strlen(ctx->input_text);
-  int size = strlen(text) + 1;
-  expect(len + size <= (int) sizeof(ctx->input_text));
-  memcpy(ctx->input_text + len, text, size);
+  int cap = (int) sizeof(ctx->input_text);
+  int room = cap - len - 1;              /* bytes free, excluding the NUL */
+  if (room <= 0) { return; }
+  int n = strlen(text);
+  if (n > room) {
+    /* Truncate rather than abort() — pasting a long aos:// URL / name into a
+       textbox must never take the whole client down. Don't split a UTF-8
+       sequence: back off to a code-point boundary. */
+    n = room;
+    while (n > 0 && ((unsigned char) text[n] & 0xc0) == 0x80) { n--; }
+  }
+  memcpy(ctx->input_text + len, text, n);
+  ctx->input_text[len + n] = '\0';
 }
 
 
@@ -782,28 +792,72 @@ int mu_textbox_raw(mu_Context *ctx, char *buf, int bufsz, mu_Id id, mu_Rect r,
   int res = 0;
   mu_update_control(ctx, id, r, opt | MU_OPT_HOLDFOCUS);
 
+  int selall = 0;
   if (ctx->focus == id) {
-    /* handle text input */
+    /* CMD/CTRL+A: mark the whole field selected. There is no cursor model, so
+       "selected" just means the next edit replaces/clears everything. */
+    if (ctx->key_pressed & MU_KEY_SELECTALL) {
+      ctx->textbox_selectall = id;
+    }
+    selall = (ctx->textbox_selectall == id);
+
+    /* CMD/CTRL+C: copy the whole field. (Copy always acts on the whole field
+       here, selected or not — there is nothing finer to copy.) */
+    if ((ctx->key_pressed & MU_KEY_COPY) && ctx->set_clipboard && buf[0]) {
+      ctx->set_clipboard(buf);
+    }
+    /* CMD/CTRL+X: cut = copy the whole field, then clear it. */
+    if (ctx->key_pressed & MU_KEY_CUT) {
+      if (ctx->set_clipboard && buf[0]) { ctx->set_clipboard(buf); }
+      if (buf[0]) { buf[0] = '\0'; res |= MU_RES_CHANGE; }
+      ctx->textbox_selectall = 0;
+      selall = 0;
+    }
+
+    /* handle text input (incl. paste, which the platform layer routes through
+       mu_input_text). If the field is "select-all", typing/pasting replaces. */
     int len = strlen(buf);
-    int n = mu_min(bufsz - len - 1, (int) strlen(ctx->input_text));
+    int n;
+    if (selall && ctx->input_text[0]) {
+      len = 0;
+      buf[0] = '\0';
+      ctx->textbox_selectall = 0;
+      selall = 0;
+      n = mu_min(bufsz - 1, (int) strlen(ctx->input_text));
+    } else {
+      n = mu_min(bufsz - len - 1, (int) strlen(ctx->input_text));
+    }
     if (n > 0) {
       memcpy(buf + len, ctx->input_text, n);
       len += n;
       buf[len] = '\0';
       res |= MU_RES_CHANGE;
     }
-    /* handle backspace */
+    /* handle backspace: with the whole field selected, clear it in one press;
+       otherwise delete the last code point. */
     if (ctx->key_pressed & MU_KEY_BACKSPACE && len > 0) {
-      /* skip utf-8 continuation bytes */
-      while ((buf[--len] & 0xc0) == 0x80 && len > 0);
-      buf[len] = '\0';
+      if (selall) {
+        len = 0;
+        buf[0] = '\0';
+        ctx->textbox_selectall = 0;
+        selall = 0;
+      } else {
+        /* skip utf-8 continuation bytes */
+        while ((buf[--len] & 0xc0) == 0x80 && len > 0);
+        buf[len] = '\0';
+      }
       res |= MU_RES_CHANGE;
     }
     /* handle return */
     if (ctx->key_pressed & MU_KEY_RETURN) {
       mu_set_focus(ctx, 0);
+      ctx->textbox_selectall = 0;
+      selall = 0;
       res |= MU_RES_SUBMIT;
     }
+  } else if (ctx->textbox_selectall == id) {
+    /* Lost focus — drop the pending whole-field selection. */
+    ctx->textbox_selectall = 0;
   }
 
   /* draw */
@@ -817,6 +871,11 @@ int mu_textbox_raw(mu_Context *ctx, char *buf, int bufsz, mu_Id id, mu_Rect r,
     int textx = r.x + mu_min(ofx, ctx->style->padding);
     int texty = r.y + (r.h - texth) / 2;
     mu_push_clip_rect(ctx, r);
+    if (selall && buf[0]) {
+      /* Whole-field selection highlight: a filled bar behind the text. */
+      mu_Color hl = ctx->style->colors[MU_COLOR_BUTTONHOVER];
+      mu_draw_rect(ctx, mu_rect(textx - 1, texty, textw + 2, texth), hl);
+    }
     mu_draw_text(ctx, font, buf, -1, mu_vec2(textx, texty), color);
     mu_draw_rect(ctx, mu_rect(textx + textw, texty, 1, texth), color);
     mu_pop_clip_rect(ctx);
