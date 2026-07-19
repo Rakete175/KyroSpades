@@ -53,7 +53,7 @@ static int player_is_obscured(struct Player* p) {
 static int player_in_view(struct Player* p) {
         return camera_CubeInFrustum(p->pos.x, p->pos.y, p->pos.z, 1.0F, 2.0F)
                && distance2D(p->pos.x, p->pos.z, camera_x, camera_z)
-                       <= pow(settings.render_distance + 2.0F, 2.0F);
+                       <= (settings.render_distance + 2.0F) * (settings.render_distance + 2.0F);
 }
 
 /* Check if a block position overlaps with the local player's AABB */
@@ -468,13 +468,13 @@ void player_update(float dt, int locked) {
                                 player_move(&players[k], dt, k);
                         } else {
                                 if(k != local_player_id) {
-                                        // smooth out player orientation
-                                        players[k].orientation_smooth.x = players[k].orientation_smooth.x * pow(0.9F, dt * 60.0F)
-                                                + players[k].orientation.x * pow(0.1F, dt * 60.0F);
-                                        players[k].orientation_smooth.y = players[k].orientation_smooth.y * pow(0.9F, dt * 60.0F)
-                                                + players[k].orientation.y * pow(0.1F, dt * 60.0F);
-                                        players[k].orientation_smooth.z = players[k].orientation_smooth.z * pow(0.9F, dt * 60.0F)
-                                                + players[k].orientation.z * pow(0.1F, dt * 60.0F);
+                                        float a = powf(0.9F, dt * 60.0F);
+                                        players[k].orientation_smooth.x = players[k].orientation_smooth.x * a
+                                                + players[k].orientation.x * (1.0F - a);
+                                        players[k].orientation_smooth.y = players[k].orientation_smooth.y * a
+                                                + players[k].orientation.y * (1.0F - a);
+                                        players[k].orientation_smooth.z = players[k].orientation_smooth.z * a
+                                                + players[k].orientation.z * (1.0F - a);
                                 }
                         }
                 }

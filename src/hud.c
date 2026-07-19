@@ -2831,8 +2831,10 @@ static const char* hud_ingame_completeword(const char* s) {
         candidates[candidates_cnt++] = (struct autocomplete_type) {"/ping", 0};
 
         // valuate all strings
+        size_t s_len = strlen(s);
         for(int k = 0; k < candidates_cnt; k++) {
-                for(int i = 0; i < strlen(candidates[k].str) && i < strlen(s); i++) {
+                size_t cand_len = strlen(candidates[k].str);
+                for(size_t i = 0; i < cand_len && i < s_len; i++) {
                         if(candidates[k].str[i] == s[i])
                                 candidates[k].acceptance += 2;
                         else if(tolower(candidates[k].str[i]) == tolower(s[i]) || s[i] == '*') {
