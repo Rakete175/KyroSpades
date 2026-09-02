@@ -93,6 +93,7 @@ struct texture texture_ui_alert;
 struct texture texture_ui_joystick;
 struct texture texture_ui_knob;
 
+struct texture texture_spotlight;
 struct texture texture_rain1;
 struct texture texture_rain2;
 struct texture texture_rain3;
@@ -858,6 +859,9 @@ void texture_init() {
         texture_create(&texture_ui_joystick, "png/ui/joystick.png");
         texture_filter(&texture_ui_joystick, TEXTURE_FILTER_LINEAR);
 #endif
+
+        texture_create(&texture_spotlight, "png/spotlight.png");
+        texture_filter(&texture_spotlight, TEXTURE_FILTER_LINEAR);
 
         texture_create(&texture_rain1, "png/weather_pack_rain_raindrop_1.png");
         texture_filter(&texture_rain1, TEXTURE_FILTER_LINEAR);

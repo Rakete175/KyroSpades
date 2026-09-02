@@ -110,6 +110,7 @@ enum window_keys {
 	WINDOW_KEY_MAP_ZOOM,
 	WINDOW_KEY_RECORDING,
 	WINDOW_KEY_REPLAY_SAVE,
+	WINDOW_KEY_FLASHLIGHT,
 	/* Editing-only keys used by microui text fields. They are registered
 	   without user-facing bindings so every backend routes them through the
 	   same input path. */

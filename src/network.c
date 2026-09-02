@@ -37,6 +37,7 @@
 #include "hud.h"
 #include "map.h"
 #include "player.h"
+#include "flashlight.h"
 #include "network.h"
 #include "particle.h"
 #include "texture.h"
@@ -610,6 +611,7 @@ void read_PacketMapStart(void* data, int len) {
         player_clear_corpses();
         bloodmarks_clear();
         damagenumbers_clear();
+        flashlight_reset();
         // ffs someone fix the wrong map size of 1.5mb
         if(compressed_chunk_data) {
                 free(compressed_chunk_data);
@@ -1433,6 +1435,7 @@ void network_disconnect() {
                 player_clear_corpses();
                 bloodmarks_clear();
                 damagenumbers_clear();
+                flashlight_reset();
                 /* Belt-and-braces: the live chat ring belongs to the just-closed
                    session. server_c also calls chat_clear on the next connect,
                    but clearing here too prevents any UI that runs in the
