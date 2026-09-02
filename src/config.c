@@ -342,6 +342,8 @@ void config_save() {
         config_setf("client", "volumetric_light_brightness", settings.volumetric_light_brightness);
         config_setf("client", "volumetric_light_range", settings.volumetric_light_range);
         config_seti("client", "lens_flare", settings.lens_flare);
+        config_seti("client", "flashlight", settings.flashlight);
+        config_seti("client", "everyone_flashlight", settings.everyone_flashlight);
         config_seti("client", "chromatic_aberration", settings.chromatic_aberration);
         config_setf("client", "chromatic_aberration_strength", settings.chromatic_aberration_strength);
         config_seti("client", "filmic_tonemapping", settings.filmic_tonemapping);
@@ -518,6 +520,8 @@ IMPORT_SETTING(settings.camera_movement, camera_movement, atoi(value));
                 IMPORT_SETTING(settings.volumetric_light_range, volumetric_light_range,
                                fmaxf(0.1F, fminf(2.0F, atof(value))));
                 IMPORT_SETTING(settings.lens_flare, lens_flare, atoi(value));
+                IMPORT_SETTING(settings.flashlight, flashlight, atoi(value));
+                IMPORT_SETTING(settings.everyone_flashlight, everyone_flashlight, atoi(value));
                 IMPORT_SETTING(settings.chromatic_aberration, chromatic_aberration, atoi(value));
                 IMPORT_SETTING(settings.chromatic_aberration_strength, chromatic_aberration_strength,
                                fmaxf(0.0F, fminf(10.0F, atof(value))));
@@ -801,6 +805,7 @@ void config_reload() {
         config_register_key(WINDOW_KEY_COMMAND, SDLK_SLASH, "chat_command", 0, "Command", "Game");
         config_register_key(WINDOW_KEY_HIDEHUD, SDLK_F6, "hide_hud", 1, "Hide HUD", "Game");
         config_register_key(WINDOW_KEY_LASTTOOL, SDLK_q, "last_tool", 0, "Last tool", "Tools & Weapons");
+        config_register_key(WINDOW_KEY_FLASHLIGHT, SDLK_f, "flashlight", 0, "Flashlight", "Game");
         config_register_key(WINDOW_KEY_NETWORKSTATS, SDLK_F12, "network_stats", 1, "Network stats", "Information");
          config_register_key(WINDOW_KEY_SAVE_MAP, SDLK_F9, "save_map", 0, "Save map", "Game");
         config_register_key(WINDOW_KEY_SELECT1, SDLK_1, NULL, 0, NULL, NULL);
@@ -875,6 +880,7 @@ void config_reload() {
         config_register_key(WINDOW_KEY_COMMAND, GLFW_KEY_SLASH, "chat_command", 0, "Command", "Game");
         config_register_key(WINDOW_KEY_HIDEHUD, GLFW_KEY_F6, "hide_hud", 1, "Hide HUD", "Game");
         config_register_key(WINDOW_KEY_LASTTOOL, GLFW_KEY_Q, "last_tool", 0, "Last tool", "Tools & Weapons");
+        config_register_key(WINDOW_KEY_FLASHLIGHT, GLFW_KEY_F, "flashlight", 0, "Flashlight", "Game");
         config_register_key(WINDOW_KEY_NETWORKSTATS, GLFW_KEY_F12, "network_stats", 1, "Network stats", "Information");
          config_register_key(WINDOW_KEY_SAVE_MAP, GLFW_KEY_F9, "save_map", 0, "Save map", "Game");
         config_register_key(WINDOW_KEY_SELECT1, GLFW_KEY_1, NULL, 0, NULL, NULL);
@@ -1286,6 +1292,28 @@ void config_reload() {
                                  .max = 2.0F,
                                  .help = "Range of rays from sun (0.1=short, 2=full screen)",
                                  .name = "Ray range",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Lighting",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.flashlight,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Enable flashlights (toggle your own with the Flashlight key)",
+                                 .name = "Flashlight",
+                                 .category = "Visual Effects",
+                                 .subcategory = "Lighting",
+                         });
+        list_add(&config_settings,
+                         &(struct config_setting) {
+                                 .value = &settings_tmp.everyone_flashlight,
+                                 .type = CONFIG_TYPE_INT,
+                                 .min = 0,
+                                 .max = 1,
+                                 .help = "Show every other player with their flashlight always on",
+                                 .name = "Everyone has a flashlight",
                                  .category = "Visual Effects",
                                  .subcategory = "Lighting",
                          });

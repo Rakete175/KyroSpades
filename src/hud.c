@@ -38,6 +38,7 @@
 #include "player.h"
 extern float tactical_sprint_amount;
 #include "hud.h"
+#include "flashlight.h"
 #include "recorder.h"
 #include "http.h"
 #include "parson.h"
@@ -3234,6 +3235,11 @@ static void hud_ingame_keyboard(int key, int action, int mods, int internal) {
 
                         if(show_exit) {
                                 return;
+                        }
+
+                        if(key == WINDOW_KEY_FLASHLIGHT && settings.flashlight) {
+                                flashlight_toggle();
+                                chat_add(0, 0x00FFFF, flashlight_on ? "Flashlight on" : "Flashlight off");
                         }
 
                         if(key == WINDOW_KEY_LASTTOOL) {

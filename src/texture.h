@@ -92,6 +92,7 @@ extern struct texture texture_ui_alert;
 extern struct texture texture_ui_joystick;
 extern struct texture texture_ui_knob;
 
+extern struct texture texture_spotlight;
 extern struct texture texture_rain1;
 extern struct texture texture_rain2;
 extern struct texture texture_rain3;

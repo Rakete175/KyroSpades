@@ -48,6 +48,7 @@
 #include "cameracontroller.h"
 #include "grenade.h"
 #include "player.h"
+#include "flashlight.h"
 #include "hud.h"
 #include "config.h"
 #include "log.h"
@@ -1384,6 +1385,9 @@ void display() {
                         if(settings.smooth_fog)
                                 glDisable(GL_FOG);
 
+                        matrix_upload();
+                        flashlight_render();
+
                         if(needs_postproc) {
                                 mat4 saved_proj2, saved_view2, saved_model2;
                                 memcpy(saved_proj2, matrix_projection, sizeof(mat4));
@@ -1833,6 +1837,7 @@ void init() {
         font_init();
         player_init();
         particle_init();
+        flashlight_init();
         network_init();
         ping_init();
         kv6_init();
@@ -2272,6 +2277,8 @@ int main(int argc, char** argv) {
         settings.contrast = 0.0F;
         settings.vignette = 0.0F;
         settings.volumetric_light = 0;
+        settings.flashlight = 1;
+        settings.everyone_flashlight = 0;
         settings.volumetric_light_strength = 0.2F;
         settings.volumetric_light_brightness = 0.3F;
         settings.volumetric_light_range = 1.0F;
@@ -2485,6 +2492,7 @@ int main(int argc, char** argv) {
                         particle_update(step);
                         bloodmarks_update(step);
                         damagenumbers_update(step);
+                        flashlight_update(step);
                         if(settings.rain) {
                                 particle_create_rain();
                         }

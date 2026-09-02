@@ -138,6 +138,7 @@ static const char* window_internal_keyname(int internal) {
 		case WINDOW_KEY_F12:             return "F12";
 		case WINDOW_KEY_SCREENSHOT:      return "F5";
 		case WINDOW_KEY_HIDEHUD:         return "F6";
+		case WINDOW_KEY_FLASHLIGHT:      return "F";
 		case WINDOW_KEY_SAVE_MAP:        return "F8";
 		case WINDOW_KEY_FULLSCREEN:      return "F11";
 		case WINDOW_KEY_NETWORKSTATS:    return "F12";

@@ -218,6 +218,7 @@ list(APPEND CLIENT_SOURCES entitysystem.c)
 list(APPEND CLIENT_SOURCES demo.c)
 list(APPEND CLIENT_SOURCES bloodmarks.c)
 list(APPEND CLIENT_SOURCES damagenumbers.c)
+list(APPEND CLIENT_SOURCES flashlight.c)
 # icon.rc is a Windows resource file — skip it on non-Windows platforms
 if(WIN32)
         list(APPEND CLIENT_SOURCES ${KyroSpades_SOURCE_DIR}/resources/icon.rc)
